@@ -1,0 +1,19 @@
+# Mac 系统文件
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python 运行时缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Claude Code 内部文件
+.claude/
+
+# 临时文件
+未命名.txt
+
+# 测试模板（不纳入版本管理）
+/货架偏移容差测试用例.xlsx
