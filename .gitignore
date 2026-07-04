@@ -17,3 +17,22 @@ __pycache__/
 
 # 测试模板（不纳入版本管理）
 /货架偏移容差测试用例.xlsx
+
+# Java 运行环境（Allure 需要，约 50MB，各平台自行安装）
+/.jre/
+
+# Allure CLI 工具（约 24MB，各平台自行安装）
+/.allure/
+
+# Allure 测试数据（JSON 中间文件）
+/allure_results/
+
+# Allure 生成的 HTML 报告
+/allure_report/
+
+# pytest 缓存
+/.pytest_cache/
+
+# coverage 覆盖率报告
+/htmlcov/
+/.coverage
