@@ -59,20 +59,25 @@ import openpyxl
 BASE_DIR = Path(__file__).parent.resolve()
 TESTCASES_DIR = BASE_DIR / 'testcases'
 PORT = 8765
+ACTIVE_FILENAME = '_active.xlsx'
+MEMORY_FILE = TESTCASES_DIR / '_memory.json'  # 记录原始文件名
 
 # 列名智能识别规则（支持中英文常见表头）
 COLUMN_PATTERNS = {
-    'id':           ['编号', 'ID', '用例ID', '用例编号', '序号', 'No.', '编号ID', '用例号', 'NO'],
-    'title':        ['标题', '用例名称', '测试点', '用例标题', '名称', '测试项', '测试标题', '功能点', '测试内容'],
-    'precondition': ['前置条件', '预置条件', '前提条件', '准备条件', '前置', '预设', '环境准备'],
-    'steps':        ['步骤', '测试步骤', '操作步骤', '执行步骤', '测试过程', '操作过程', '测试操作'],
-    'expected':     ['预期结果', '期望结果', '预期', '期望', '预计结果', '预期输出', '期望输出'],
-    'purpose':      ['测试目的', '目的', '测试目标', '测试说明', '目标', '测试意图'],
-    'priority':     ['优先级', '等级', '重要程度', '级别', '严重程度', 'P级', '重要级别'],
-    'module':       ['模块', '所属模块', '功能模块', '测试模块', '需求模块', '系统模块'],
-    'category':     ['分类', '用例类型', '测试类型', '类型', '测试分类'],
+    'id':           ['用例编号', '编号', '用例ID', '序号', 'No.', '编号ID', '用例号', 'NO'],
+    'title':        ['用例标题', '用例名称', '标题', '测试点', '名称', '测试项', '测试标题', '功能点', '测试内容'],
+    'precondition': ['前置条件', '预置条件', '前提条件', '准备条件', '预设', '环境准备'],
+    'steps':        ['测试步骤', '步骤', '操作步骤', '执行步骤', '测试过程', '操作过程', '测试操作'],
+    'expected':     ['预期结果', '期望结果', '预计结果', '预期输出', '期望输出'],
+    'purpose':      ['测试目的', '目的', '测试目标', '测试说明', '测试意图'],
+    'priority':     ['优先级', '重要程度', '严重程度', 'P级', '重要级别'],
+    'module':       ['所属模块', '模块', '功能模块', '测试模块', '需求模块', '系统模块'],
+    'category':     ['用例类型', '测试类型', '测试分类', '分类'],
+    'result_col':   ['测试结果', '执行结果', 'Pass/Fail'],
+    'remark_col':   ['备注', '测试现象备注', '测试备注', '执行备注'],
 }
 
+# 保存时写入的列名（如 Excel 中没有则自动新建）
 RESULT_COL = '测试结果'
 REMARK_COL = '测试现象备注'
 TIME_COL   = '执行时间'
@@ -81,78 +86,251 @@ TIME_COL   = '执行时间'
 # ============================================================
 # 2. Excel 操作
 # ============================================================
+ACTIVE_PATH = TESTCASES_DIR / ACTIVE_FILENAME
+
+
 def find_excel_file():
-    """在 testcases 目录中查找 Excel 文件（排除临时文件）"""
+    """只找 _active.xlsx（唯一的活跃文件）"""
     if not TESTCASES_DIR.exists():
         TESTCASES_DIR.mkdir(parents=True)
         return None
+    if ACTIVE_PATH.exists():
+        return ACTIVE_PATH
+    return None
 
-    excels = []
-    for pattern in ['*.xlsx', '*.xls']:
-        for f in TESTCASES_DIR.glob(pattern):
-            if not f.name.startswith('~$') and not f.name.startswith('.'):
-                excels.append(f)
 
-    return excels[0] if excels else None
+def read_memory():
+    """读取记忆文件，返回原始文件名"""
+    if MEMORY_FILE.exists():
+        try:
+            import json as _json
+            with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+                return data.get('original_name', '')
+        except Exception:
+            pass
+    return ''
+
+
+def write_memory(original_name):
+    """写入记忆文件，记录原始文件名"""
+    import json as _json
+    MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+        _json.dump({'original_name': original_name}, f, ensure_ascii=False)
+
+
+def validate_excel(filepath):
+    """校验 Excel 格式是否合法（有表头，有数据）"""
+    try:
+        wb = openpyxl.load_workbook(filepath, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        if len(rows) < 2:
+            return False, 'Excel 至少需要一行表头和一行数据，当前数据不足'
+        # 检查表头是否全是空的
+        if all(cell is None or str(cell).strip() == '' for cell in rows[0]):
+            return False, 'Excel 第一行（表头）为空，请确保第一行为列名'
+        return True, ''
+    except Exception as e:
+        return False, f'无法读取 Excel 文件，文件可能已损坏: {str(e)}'
+
+
+def has_test_results():
+    """检查当前活跃文件是否已有测试结果（用于覆盖前确认）"""
+    if not ACTIVE_PATH.exists():
+        return False
+    try:
+        wb = openpyxl.load_workbook(ACTIVE_PATH, data_only=True)
+        ws = wb.active
+        headers = [str(ws.cell(row=1, column=c + 1).value).strip()
+                   if ws.cell(row=1, column=c + 1).value is not None else ''
+                   for c in range(ws.max_column)]
+        result_col_idx = None
+        for i, h in enumerate(headers):
+            if h == RESULT_COL:
+                result_col_idx = i + 1
+                break
+        if result_col_idx is None:
+            wb.close()
+            return False
+        # 检查是否有任何一行已有结果
+        for row in range(2, ws.max_row + 1):
+            val = ws.cell(row=row, column=result_col_idx).value
+            if val and str(val).strip():
+                wb.close()
+                return True
+        wb.close()
+        return False
+    except Exception:
+        return False
 
 
 def detect_columns(headers):
-    """将 Excel 表头智能映射到标准字段"""
+    """将 Excel 表头智能映射到标准字段。
+    优先精确匹配，避免模糊匹配的交叉误匹配。"""
     mapping = {}
     for i, h in enumerate(headers):
         h_str = str(h).strip() if h else ''
+        if h_str == '':
+            continue
+
+        # 第一遍：只做精确匹配
+        matched = False
         for field, patterns in COLUMN_PATTERNS.items():
-            if h_str == '':
-                continue
-            matched = False
             if h_str in patterns:
-                matched = True
-            else:
-                for pat in patterns:
-                    if pat in h_str or h_str in pat:
-                        matched = True
-                        break
-            if matched:
                 mapping[field] = i
+                matched = True
                 break
+        if matched:
+            continue
+
+        # 第二遍：模糊匹配（表头包含模式关键词 或 模式词包含表头）
+        # 但仅在关键词长度 >= 3 时才模糊匹配，避免 "ID" 等短词误匹配
+        for field, patterns in COLUMN_PATTERNS.items():
+            for pat in patterns:
+                if len(pat) < 3:
+                    continue  # 太短的关键词不做模糊匹配
+                if pat in h_str or h_str in pat:
+                    mapping[field] = i
+                    matched = True
+                    break
+            if matched:
+                break
+
     mapping['_headers'] = headers
     return mapping
 
 
-def read_testcases(filepath):
-    """读取 Excel，返回（用例列表, 列映射, 表头列表）"""
+def _find_header_row_for_file(filepath):
+    """为文件智能定位表头行（复用 _find_header_row 逻辑）"""
     wb = openpyxl.load_workbook(filepath, data_only=True)
     ws = wb.active
+    result = _find_header_row(ws)
+    wb.close()
+    return result
 
-    rows = list(ws.iter_rows(values_only=True))
-    if len(rows) < 2:
+
+def _detect_header_row_index(filepath):
+    """返回智能定位到的表头行号（1-based）"""
+    idx, _ = _find_header_row_for_file(filepath)
+    return idx if idx else 1
+
+
+def _find_header_row(ws):
+    """智能定位真正的表头行。
+    自动跳过顶部的大标题、说明文本、空行等非数据行。
+    返回 (表头行号, 表头内容列表)，表头行号为 1-based。"""
+    raw_rows = list(ws.iter_rows(values_only=True, max_row=min(ws.max_row, 100)))
+    if not raw_rows:
+        return None, []
+
+    def _clean(v):
+        return str(v).strip() if v is not None else ''
+
+    # 策略：找第一行"像表头"的行 —— 该行有效非空单元格 >= 2
+    # 且该行下一行有数据（不是空行）
+    for i, row in enumerate(raw_rows):
+        filled = sum(1 for c in row if _clean(c))
+        if filled >= 2:
+            # 检查下一行是否有数据
+            if i + 1 < len(raw_rows):
+                next_filled = sum(1 for c in raw_rows[i+1] if _clean(c))
+                if next_filled >= 1:
+                    return (i + 1, [_clean(c) for c in row])
+            else:
+                # 最后一行就当它是表头好了
+                return (i + 1, [_clean(c) for c in row])
+    # 兜底：用第一行
+    return (1, [_clean(c) for c in raw_rows[0]])
+
+
+def _count_data_rows(ws, header_idx):
+    """从表头行下一行开始，统计有效数据行数。"""
+    count = 0
+    for r in range(header_idx + 1, ws.max_row + 1):
+        row_vals = [ws.cell(row=r, column=c + 1).value for c in range(ws.max_column)]
+        if any(v is not None and str(v).strip() for v in row_vals):
+            count += 1
+    return count
+
+
+def _pick_best_sheet(wb):
+    """在多个 Sheet 中自动选择最佳的测试用例 Sheet。
+    策略：选数据行最多的那个（排除纯说明/汇总类 Sheet）。"""
+    best_sheet = wb.active
+    best_count = 0
+
+    for sname in wb.sheetnames:
+        ws = wb[sname]
+        raw_rows = list(ws.iter_rows(values_only=True, max_row=min(ws.max_row, 100)))
+        if len(raw_rows) < 2:
+            continue
+
+        # 找表头
+        header_idx = None
+        for i, row in enumerate(raw_rows):
+            filled = sum(1 for c in row if c is not None and str(c).strip())
+            if filled >= 2:
+                if i + 1 < len(raw_rows):
+                    next_filled = sum(1 for c in raw_rows[i+1] if c is not None and str(c).strip())
+                    if next_filled >= 1:
+                        header_idx = i + 1
+                        break
+                else:
+                    header_idx = i + 1
+                    break
+        if header_idx is None:
+            continue
+
+        cnt = _count_data_rows(ws, header_idx)
+        if cnt > best_count:
+            best_count = cnt
+            best_sheet = ws
+
+    return best_sheet
+
+
+def read_testcases(filepath):
+    """读取 Excel，返回（用例列表, 列映射, 表头列表, sheet名称, 表头行号）。
+    智能选择最佳 Sheet，自动跳过首行标题、说明文本等非表头行。"""
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+
+    # 智能选择最佳 Sheet
+    ws = _pick_best_sheet(wb)
+    sheet_name = ws.title
+
+    all_rows = list(ws.iter_rows(values_only=True))
+    if len(all_rows) < 2:
         wb.close()
-        return [], {}, []
+        return [], {}, [], sheet_name, 1
 
-    # 解析表头（去空格）
-    raw_headers = []
-    for cell in rows[0]:
-        v = str(cell).strip() if cell is not None else ''
-        raw_headers.append(v)
-    headers = raw_headers
+    # 智能定位表头行
+    header_idx, headers = _find_header_row(ws)
+    # 数据行从表头的正下方一行开始
+    # header_idx 是 1-based 行号，all_rows 是 0-based
+    # all_rows[header_idx] 即表头行的下一行（第一条数据）
+    data_start = header_idx  # 0-based index，第一条数据行在 all_rows 中的位置
+    data_rows = all_rows[data_start:]
+
     mapping = detect_columns(headers)
 
-    # 找到结果列（如果已有）
-    result_col_idx = None
-    remark_col_idx = None
-    for i, h in enumerate(headers):
-        if h == RESULT_COL:
-            result_col_idx = i
-        if h == REMARK_COL:
-            remark_col_idx = i
+    # 找到结果和备注列
+    result_col_idx = mapping.get('result_col')
+    remark_col_idx = mapping.get('remark_col')
 
-    # 解析数据行
+    # 解析数据行（从表头的下一行开始）
     testcases = []
-    for row_idx, row in enumerate(rows[1:], start=1):
+    for row_idx_in_data, row in enumerate(data_rows):
         if all(cell is None or str(cell).strip() == '' for cell in row):
             continue
 
-        tc = {'_row': row_idx + 1}  # Excel 实际行号
+        # Excel 实际行号（1-based）
+        # header_idx = 表头行号 (1-based)
+        # row_idx_in_data = data_rows 中的索引 (0 = 第一条数据)
+        excel_row_number = header_idx + 1 + row_idx_in_data
+        tc = {'_row': excel_row_number}
 
         for i, value in enumerate(row):
             tc[f'col_{i}'] = str(value).strip() if value is not None else ''
@@ -163,80 +341,125 @@ def read_testcases(filepath):
                 raw_val = row[col_idx]
                 tc[field] = str(raw_val).strip() if raw_val is not None else ''
 
+        # 读入已保存的测试结果（从 result_col 列读取）
         if result_col_idx is not None and result_col_idx < len(row):
             tc['_saved_result'] = str(row[result_col_idx]).strip() if row[result_col_idx] is not None else ''
         else:
             tc['_saved_result'] = ''
 
+        # 读入已保存的实际结果（从 remark_col 列读取——即 Excel 中的"实际结果"列）
         if remark_col_idx is not None and remark_col_idx < len(row):
-            tc['_saved_remark'] = str(row[remark_col_idx]).strip() if row[remark_col_idx] is not None else ''
+            tc['_saved_actual_result'] = str(row[remark_col_idx]).strip() if row[remark_col_idx] is not None else ''
         else:
-            tc['_saved_remark'] = ''
+            tc['_saved_actual_result'] = ''
+
+        # 读入已保存的 BugID、Bug频率、问题时间、测试人员
+        # 这些字段通过列名直接从 header 查找（与 result_col 相同的查找方式）
+        for extra_key, col_name in [('_saved_tester', '测试人员'),
+                                      ('_saved_bug_id', 'BugID'),
+                                      ('_saved_bug_frequency', 'Bug频率'),
+                                      ('_saved_issue_time', '问题时间')]:
+            extra_col = None
+            for i, h in enumerate(headers):
+                if h == col_name:
+                    extra_col = i
+                    break
+            if extra_col is not None and extra_col < len(row):
+                tc[extra_key] = str(row[extra_col]).strip() if row[extra_col] is not None else ''
+            else:
+                tc[extra_key] = ''
 
         # 构建搜索文本（所有字段拼接，用于全文搜索）
         search_parts = []
-        for field in ['id', 'title', 'module', 'priority', 'category',
-                       'precondition', 'steps', 'expected', 'purpose']:
-            if field in tc:
-                search_parts.append(tc[field])
         for i in range(len(row)):
-            if tc.get(f'col_{i}', ''):
-                search_parts.append(tc[f'col_{i}'])
+            field_key = f'col_{i}'
+            cell_val = tc.get(field_key, '')
+            if cell_val and cell_val != 'None':
+                search_parts.append(cell_val)
         tc['_search_text'] = ' '.join(search_parts)
 
         testcases.append(tc)
 
     wb.close()
-    return testcases, mapping, headers
+    return testcases, mapping, headers, sheet_name, header_idx
 
 
-def save_result(filepath, row_number, result, remark):
-    """将测试结果写入 Excel 指定行"""
+# 保存时写入的列名（如 Excel 中没有则自动新建）
+SAVE_COLUMNS = {
+    'result':        '测试结果',
+    'actual_result': '实际结果',
+    'tester':        '测试人员',
+    'bug_id':        'BugID',
+    'bug_frequency': 'Bug频率',
+    'issue_time':    '问题时间',
+    'exec_time':     '执行时间',
+}
+
+
+def save_result(filepath, row_number, header_row_idx, sheet_name, result, actual_result,
+                tester, bug_id, bug_frequency, issue_time):
+    """将测试结果写入 Excel 指定行和指定 Sheet。
+    header_row_idx: 智能定位到的表头行号（1-based）
+    sheet_name: 目标 Sheet 名称"""
     wb = openpyxl.load_workbook(filepath)
-    ws = wb.active
+    ws = wb[sheet_name]  # 使用指定的 Sheet，而不是 active
 
-    header_cells = [ws.cell(row=1, column=c + 1) for c in range(ws.max_column)]
+    # 使用智能定位到的表头行
+    # 实际保存列名：测试结果 / 实际结果 / 测试人员 / BugID / Bug频率 / 问题时间 / 执行时间
+    max_col = max(ws.max_column, 1)
+    header_cells = [ws.cell(row=header_row_idx, column=c + 1) for c in range(max_col)]
     headers_row = [str(c.value).strip() if c.value is not None else '' for c in header_cells]
-    while len(headers_row) < ws.max_column:
-        headers_row.append('')
+
+    # 读取所有行以便追加时也能正确
+    all_rows_vals = list(ws.iter_rows(min_row=header_row_idx, values_only=True))
+    # 确保 headers_row 至少覆盖到最宽的行
+    for r in all_rows_vals:
+        while len(headers_row) < len(r):
+            headers_row.append('')
 
     def find_or_create_col(col_name):
         for i, h in enumerate(headers_row):
             if h == col_name:
                 return i + 1
         new_col = len(headers_row) + 1
-        ws.cell(row=1, column=new_col, value=col_name)
+        ws.cell(row=header_row_idx, column=new_col, value=col_name)
         headers_row.append(col_name)
         return new_col
 
-    result_col = find_or_create_col(RESULT_COL)
-    remark_col = find_or_create_col(REMARK_COL)
-    time_col   = find_or_create_col(TIME_COL)
+    # 按需创建列
+    result_col = find_or_create_col(SAVE_COLUMNS['result'])
+    actual_col = find_or_create_col(SAVE_COLUMNS['actual_result'])
+    tester_col = find_or_create_col(SAVE_COLUMNS['tester'])
+    bug_id_col = find_or_create_col(SAVE_COLUMNS['bug_id'])
+    bug_freq_col = find_or_create_col(SAVE_COLUMNS['bug_frequency'])
+    issue_time_col = find_or_create_col(SAVE_COLUMNS['issue_time'])
+    exec_time_col = find_or_create_col(SAVE_COLUMNS['exec_time'])
 
     now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     ws.cell(row=row_number, column=result_col, value=result)
-    ws.cell(row=row_number, column=remark_col, value=remark)
-    ws.cell(row=row_number, column=time_col,   value=now_str)
+    ws.cell(row=row_number, column=actual_col, value=actual_result)
+    ws.cell(row=row_number, column=tester_col, value=tester)
+    ws.cell(row=row_number, column=bug_id_col, value=bug_id)
+    ws.cell(row=row_number, column=bug_freq_col, value=bug_frequency)
+    ws.cell(row=row_number, column=issue_time_col, value=issue_time)
+    ws.cell(row=row_number, column=exec_time_col, value=now_str)
 
     wb.save(filepath)
     wb.close()
 
 
 def build_display_fields(tc, mapping, headers):
-    """构建前端展示用的字段列表（有序）"""
+    """构建前端展示用的字段列表（有序）。
+    所有 Excel 列都展示，即使值为空也不省略。"""
     fields = []
 
     ordered_specials = [
         ('id',           '\U0001f4cb 用例编号', 'field-id'),
-        ('title',        '\U0001f4cc 用例标题', 'field-title'),
-        ('module',       '\U0001f4c1 所属模块', 'field-meta'),
         ('priority',     '⚡ 优先级',   'field-meta'),
-        ('category',     '\U0001f3f7️ 分类',     'field-meta'),
-        ('precondition', '\U0001f527 前置条件', 'field-section'),
+        ('precondition', '\U0001f527 前置条件', 'field-section field-section-pre'),
         ('steps',        '\U0001f4dd 测试步骤', 'field-section field-steps'),
         ('expected',     '✅ 预期结果', 'field-section field-expected'),
-        ('purpose',      '\U0001f3af 测试目的', 'field-purpose'),
     ]
 
     displayed_cols = set()
@@ -245,26 +468,28 @@ def build_display_fields(tc, mapping, headers):
         if field in mapping:
             col_idx = mapping[field]
             val = tc.get(field, '')
-            if val:
-                fields.append({
-                    'label': label,
-                    'value': val,
-                    'css_class': css_class,
-                })
-                displayed_cols.add(col_idx)
+            fields.append({
+                'label': label,
+                'value': val if val else '',
+                'css_class': css_class,
+            })
+            displayed_cols.add(col_idx)
 
+    # 其余未展示的列也全部输出（包括空值）
+    # 注意：不跳过任何原始 Excel 列，包括原始就存在的 Pass/Fail、备注等列
     for i, h in enumerate(headers):
         if i in displayed_cols:
             continue
-        if i >= len(headers):
-            continue
         val = tc.get(f'col_{i}', '')
-        if val and val != 'None' and h not in (RESULT_COL, REMARK_COL, TIME_COL):
-            fields.append({
-                'label': f'\U0001f4c4 {h}',
-                'value': val,
-                'css_class': 'field-section',
-            })
+        if val == 'None':
+            val = ''
+        fields.append({
+            'label': f'\U0001f4c4 {h}',
+            'value': val if val else '',
+            'css_class': 'field-section',
+        })
+
+    return fields
 
     return fields
 
@@ -280,6 +505,8 @@ STATE = {
     'headers': [],
     'filepath': None,
     'filename': '',
+    'sheet_name': None,      # 实际使用的 sheet 名称
+    'header_row': 1,         # 智能定位到的表头行号
 }
 
 
@@ -290,10 +517,12 @@ def index():
 
 @app.route('/api/init')
 def api_init():
+    display_name = read_memory() or STATE.get('filename', '')
     return jsonify({
         'loaded': len(STATE['testcases']) > 0,
-        'filename': STATE['filename'],
+        'filename': display_name,
         'total': len(STATE['testcases']),
+        'has_active': ACTIVE_PATH.exists(),
     })
 
 
@@ -533,7 +762,11 @@ def api_save():
     data = request.get_json()
     index = data.get('index')
     result = data.get('result', '')
-    remark = data.get('remark', '')
+    actual_result = data.get('actual_result', '')
+    tester = data.get('tester', '')
+    bug_id = data.get('bug_id', '')
+    bug_frequency = data.get('bug_frequency', '')
+    issue_time = data.get('issue_time', '')
 
     if index is None or index < 0 or index >= len(STATE['testcases']):
         return jsonify({'success': False, 'error': '索引无效'}), 400
@@ -542,10 +775,20 @@ def api_save():
 
     try:
         row_number = STATE['testcases'][index]['_row']
-        save_result(STATE['filepath'], row_number, result, remark)
+        # 复用 STATE 中已存储的 header_row 和 sheet_name
+        header_row_idx = STATE.get('header_row', 1)
+        sheet_name = STATE.get('sheet_name')
+        # 如果 sheet_name 为空（旧版兼容），则不传或默认为 None
+        save_result(STATE['filepath'], row_number, header_row_idx, sheet_name,
+                    result, actual_result, tester, bug_id, bug_frequency, issue_time)
 
+        # 更新内存
         STATE['testcases'][index]['_saved_result'] = result
-        STATE['testcases'][index]['_saved_remark'] = remark
+        STATE['testcases'][index]['_saved_actual_result'] = actual_result
+        STATE['testcases'][index]['_saved_tester'] = tester
+        STATE['testcases'][index]['_saved_bug_id'] = bug_id
+        STATE['testcases'][index]['_saved_bug_frequency'] = bug_frequency
+        STATE['testcases'][index]['_saved_issue_time'] = issue_time
 
         return jsonify({'success': True})
     except PermissionError:
@@ -555,6 +798,123 @@ def api_save():
         }), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reload')
+def api_reload():
+    """重新加载 Excel 文件，pick 外部修改（新增/删除用例等）"""
+    global STATE
+    filepath = find_excel_file()
+    if filepath is None:
+        return jsonify({
+            'success': False,
+            'error': '未找到活跃文件，请先上传测试用例 Excel'
+        }), 404
+
+    try:
+        testcases, mapping, headers, sheet_name, header_row = read_testcases(filepath)
+        STATE['testcases'] = testcases
+        STATE['mapping'] = mapping
+        STATE['headers'] = headers
+        STATE['filepath'] = str(filepath)
+        STATE['filename'] = filepath.name
+        STATE['sheet_name'] = sheet_name
+        STATE['header_row'] = header_row
+        display_name = read_memory() or filepath.name
+
+        return jsonify({
+            'success': True,
+            'filename': display_name,
+            'total': len(testcases),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload', methods=['POST'])
+def api_upload():
+    """上传 Excel 文件，保存为 _active.xlsx"""
+    global STATE
+
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '未收到文件'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': '文件名为空'}), 400
+
+    # 检查文件类型
+    fname = file.filename.lower()
+    if not (fname.endswith('.xlsx') or fname.endswith('.xls')):
+        return jsonify({
+            'success': False,
+            'error': '不支持的文件格式，请上传 .xlsx 或 .xls 文件'
+        }), 400
+
+    # 确保目录存在
+    TESTCASES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 先保存到临时位置校验
+    import tempfile
+    tmp_path = None
+    try:
+        suffix = '.xlsx' if fname.endswith('.xlsx') else '.xls'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            file.save(tmp.name)
+            tmp_path = tmp.name
+
+        # 校验格式
+        valid, errmsg = validate_excel(Path(tmp_path))
+        if not valid:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            return jsonify({'success': False, 'error': errmsg}), 400
+
+        # 校验通过 → 覆盖 _active.xlsx
+        import shutil
+        shutil.move(tmp_path, str(ACTIVE_PATH))
+        tmp_path = None  # 已移动，不需要清理
+
+        # 写入记忆
+        original_name = file.filename
+        write_memory(original_name)
+
+        # 重新解析
+        testcases, mapping, headers, sheet_name, header_row = read_testcases(ACTIVE_PATH)
+        STATE['testcases'] = testcases
+        STATE['mapping'] = mapping
+        STATE['headers'] = headers
+        STATE['filepath'] = str(ACTIVE_PATH)
+        STATE['filename'] = ACTIVE_FILENAME
+        STATE['sheet_name'] = sheet_name
+        STATE['header_row'] = header_row
+
+        return jsonify({
+            'success': True,
+            'filename': original_name,
+            'total': len(testcases),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'处理文件时出错: {str(e)}'}), 500
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+@app.route('/api/check-results')
+def api_check_results():
+    """检查当前活跃文件是否已有测试结果（用于上传前确认）"""
+    has = has_test_results()
+    display_name = read_memory() or ACTIVE_FILENAME
+    return jsonify({
+        'has_results': has,
+        'filename': display_name,
+    })
 
 
 # ============================================================
@@ -830,6 +1190,74 @@ body{
 .btn-outline{background:var(--card);border:2px solid var(--border);color:var(--text);}
 .btn-outline:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-light);}
 
+/* ========== 额外字段 ========== */
+.extra-label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--text-secondary); margin-bottom: 4px;
+}
+.extra-input {
+    width: 100%; padding: 8px 10px; border: 2px solid var(--border);
+    border-radius: var(--radius-sm); font-size: 13px; font-family: inherit;
+    background: var(--card); color: var(--text);
+    transition: border-color .15s; box-sizing: border-box;
+}
+.extra-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+
+/* ========== 前置条件美化 ========== */
+.field-section-pre .field-value {
+    color: #1e40af;
+    background: #eff6ff;
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    border-left: 4px solid #3b82f6;
+}
+
+/* ========== 结果按钮美化 ========== */
+.result-btn {
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all .2s ease;
+}
+.result-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,.1);
+}
+.result-btn.selected-pass { background: #dcfce7; border-color: #22c55e; color: #15803d; }
+.result-btn.selected-fail { background: #fee2e2; border-color: #ef4444; color: #b91c1c; }
+.result-btn.selected-block { background: #ffedd5; border-color: #f97316; color: #c2410c; }
+.result-btn.selected-skip { background: #f3f4f6; border-color: #9ca3af; color: #4b5563; }
+
+/* ========== 问题列表 ========== */
+.issue-list { display: flex; flex-direction: column; gap: 10px; }
+.issue-item {
+    background: var(--card); border: 2px solid var(--border); border-radius: var(--radius);
+    padding: 14px 18px; cursor: pointer; transition: all .15s;
+}
+.issue-item:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+.issue-item .issue-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.issue-item .issue-id { font-family: monospace; font-size: 13px; color: var(--primary); font-weight: 600; }
+.issue-item .issue-title { font-size: 15px; font-weight: 600; margin: 4px 0; }
+.issue-item .issue-meta { font-size: 12px; color: var(--text-secondary); display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* ========== 庆祝动画 ========== */
+.celebrate-wrap {
+    text-align: center; padding: 40px 20px; position: relative;
+    min-height: 400px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+}
+.celebrate-text { font-size: 28px; font-weight: 800; color: var(--text); margin-top: 20px; z-index: 1; }
+.celebrate-sub { font-size: 16px; color: var(--text-secondary); margin-top: 8px; z-index: 1; }
+.confetti {
+    position: absolute; width: 10px; height: 10px; border-radius: 50%;
+    animation: confettiFall 3s ease-out forwards;
+}
+@keyframes confettiFall {
+    0% { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+    50% { opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0); opacity: 0; }
+}
+
 /* ========== 搜索结果列表 ========== */
 .search-result-list{display:flex;flex-direction:column;gap:8px;}
 .search-result-item{
@@ -971,8 +1399,11 @@ body{
         <button class="view-tab active" id="tabExecute" onclick="switchView('execute')">&#9654; 执行测试</button>
         <button class="view-tab" id="tabSearch" onclick="switchView('search')">&#128269; 搜索筛选</button>
         <button class="view-tab" id="tabSummary" onclick="switchView('summary')">&#128202; 汇总统计</button>
+        <button class="view-tab" id="tabIssues" onclick="switchView('issues')">&#128203; 问题列表</button>
     </div>
     <div class="topbar-right">
+        <button class="btn btn-outline btn-sm" onclick="triggerReplaceFile()" title="上传新的测试用例 Excel 文件" id="btnReplace">&#128194; 更换文件</button>
+        <button class="btn btn-outline btn-sm" onclick="reloadData()" title="重新加载当前 Excel（Excel 内容更新后点此刷新）" id="btnReload">&#8635; 刷新</button>
         <span id="topbarFilename">未加载</span>
     </div>
 </div>
@@ -1045,6 +1476,13 @@ body{
     </div>
 </div>
 
+<!-- ===== 问题列表视图 ===== -->
+<div id="viewIssues" style="display:none;">
+    <div class="main-container" id="issuesContainer">
+        <div class="state-message"><div class="icon">&#9203;</div><h2>加载中...</h2></div>
+    </div>
+</div>
+
 <!-- Toast -->
 <div id="toastContainer"></div>
 
@@ -1082,10 +1520,14 @@ function _doSwitch(view) {
     document.getElementById('viewExecute').style.display = view === 'execute' ? 'block' : 'none';
     document.getElementById('viewSearch').style.display = view === 'search' ? 'block' : 'none';
     document.getElementById('viewSummary').style.display = view === 'summary' ? 'block' : 'none';
+    var issuesDiv = document.getElementById('viewIssues');
+    if (issuesDiv) issuesDiv.style.display = view === 'issues' ? 'block' : 'none';
 
     document.getElementById('tabExecute').classList.toggle('active', view === 'execute');
     document.getElementById('tabSearch').classList.toggle('active', view === 'search');
     document.getElementById('tabSummary').classList.toggle('active', view === 'summary');
+    var tabIssues = document.getElementById('tabIssues');
+    if (tabIssues) tabIssues.classList.toggle('active', view === 'issues');
 
     if (view === 'search') {
         loadFilterOptions();
@@ -1093,6 +1535,8 @@ function _doSwitch(view) {
         doSearch();
     } else if (view === 'summary') {
         loadSummary();
+    } else if (view === 'issues') {
+        loadIssues();
     }
 
     window.scrollTo({top: 0, behavior: 'smooth'});
@@ -1107,13 +1551,19 @@ async function init() {
         const data = await resp.json();
 
         if (!data.loaded) {
-            showEmptyState();
+            // 没有活跃文件 → 显示上传页
+            if (data.has_active) {
+                // 有文件但读不到数据（可能是空 Excel）
+                showEmptyState();
+            } else {
+                showUploadPage();
+            }
             return;
         }
 
         totalCount = data.total;
         document.getElementById('topbarFilename').textContent =
-            '\U0001f4c2 ' + (data.filename || '已加载');
+            '📂 ' + (data.filename || '已加载');
         document.getElementById('progressWrap').style.display = 'block';
         document.getElementById('navBar').style.display = 'flex';
         document.getElementById('navHint').style.display = 'block';
@@ -1130,12 +1580,220 @@ function showEmptyState() {
     const container = document.getElementById('execContainer');
     container.innerHTML = `
         <div class="state-message">
-            <div class="icon">\U0001f4cb</div>
-            <h2>未找到测试用例文件或未读取到用例</h2>
-            <p>请将测试用例 Excel 文件（.xlsx 或 .xls）<br>放入工具目录下的 <strong>testcases</strong> 文件夹中，<br>然后重新启动程序。<br><br>第一行应为表头，从第二行开始为用例数据。</p>
-            <div class="path-hint">将 Excel 文件放入<br><code>testcases/</code> 文件夹</div>
+            <div class="icon">&#128203;</div>
+            <h2>未读取到用例数据</h2>
+            <p>当前活跃文件中未检测到有效用例数据。<br>请确保第一行为表头，从第二行开始为用例数据。<br>你也可以重新上传一个新的测试用例文件。</p>
+            <button class="btn btn-save" style="margin-top:16px;" onclick="showReplaceDialog()">
+                &#128194; 上传新文件
+            </button>
         </div>
     `;
+}
+
+// ============================================================
+// 上传页
+// ============================================================
+function showUploadPage() {
+    const container = document.getElementById('execContainer');
+    document.getElementById('progressWrap').style.display = 'none';
+    document.getElementById('navBar').style.display = 'none';
+    document.getElementById('navHint').style.display = 'none';
+
+    container.innerHTML = `
+        <div class="upload-page" id="uploadPage">
+            <div class="upload-card" id="uploadCard">
+                <div class="upload-icon">&#128228;</div>
+                <h2>欢迎使用测试用例记录表</h2>
+                <p class="upload-desc">请上传你的测试用例 Excel 文件开始使用<br>支持 .xlsx 和 .xls 格式</p>
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-zone-icon">&#128194;</div>
+                    <div class="upload-zone-text">拖拽 Excel 文件到此处</div>
+                    <div class="upload-zone-hint">或点击下方按钮选择文件</div>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none"
+                           onchange="handleFileSelect(this)">
+                    <button class="btn btn-save" onclick="document.getElementById('fileInput').click()"
+                            style="margin-top:12px;">
+                        📁 选择文件
+                    </button>
+                </div>
+                <div class="upload-status" id="uploadStatus" style="display:none;"></div>
+            </div>
+        </div>
+        <style>
+            .upload-page {
+                display: flex; align-items: center; justify-content: center;
+                min-height: 60vh; padding: 40px 20px;
+            }
+            .upload-card {
+                background: var(--card); border-radius: var(--radius);
+                box-shadow: var(--shadow-lg); padding: 40px 36px;
+                max-width: 500px; width: 100%; text-align: center;
+            }
+            .upload-icon { font-size: 56px; margin-bottom: 12px; }
+            .upload-card h2 { font-size: 22px; margin-bottom: 8px; color: var(--text); }
+            .upload-desc { font-size: 14px; color: var(--text-secondary); margin-bottom: 28px; line-height: 1.7; }
+            .upload-zone {
+                border: 2px dashed var(--border); border-radius: var(--radius);
+                padding: 32px 20px; transition: all .2s;
+                cursor: pointer; background: #fafbfc;
+            }
+            .upload-zone:hover, .upload-zone.drag-over {
+                border-color: var(--primary); background: var(--primary-light);
+            }
+            .upload-zone-icon { font-size: 40px; margin-bottom: 8px; }
+            .upload-zone-text { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+            .upload-zone-hint { font-size: 13px; color: var(--text-secondary); }
+            .upload-status { margin-top: 16px; padding: 10px; border-radius: var(--radius-sm); font-size: 14px; }
+            .upload-status.loading { background: #eff6ff; color: #1d4ed8; }
+            .upload-status.error { background: #fef2f2; color: #991b1b; }
+        </style>
+    `;
+
+    // 拖拽事件
+    const zone = document.getElementById('uploadZone');
+    if (zone) {
+        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', () => { zone.classList.remove('drag-over'); });
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                uploadFile(files[0]);
+            }
+        });
+    }
+}
+
+async function handleFileSelect(input) {
+    if (input.files.length > 0) {
+        await uploadFile(input.files[0]);
+    }
+}
+
+async function uploadFile(file) {
+    // 检查文件类型
+    const name = file.name.toLowerCase();
+    if (!name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+        showUploadStatus('不支持的文件格式，请上传 .xlsx 或 .xls 文件', 'error');
+        return;
+    }
+
+    // 检查是否已有测试结果 → 二次确认
+    try {
+        const checkResp = await fetch('/api/check-results');
+        const checkData = await checkResp.json();
+        if (checkData.has_results) {
+            const confirmed = await showReplaceConfirmDialog(checkData.filename);
+            if (!confirmed) return;
+        }
+    } catch (err) {
+        // 检查失败不影响上传
+    }
+
+    showUploadStatus('⏳ 正在上传并解析文件...', 'loading');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await resp.json();
+
+        if (data.success) {
+            showUploadStatus('✅ 上传成功！共 ' + data.total + ' 条用例', '');
+            totalCount = data.total;
+            document.getElementById('topbarFilename').textContent =
+                '📂 ' + (data.filename || '已加载');
+            document.getElementById('progressWrap').style.display = 'block';
+            document.getElementById('navBar').style.display = 'flex';
+            document.getElementById('navHint').style.display = 'block';
+
+            // 短暂延迟后切换到执行页
+            setTimeout(async () => {
+                await refreshStatuses();
+                await loadTestCase(0);
+            }, 600);
+        } else {
+            showUploadStatus('❌ ' + (data.error || '上传失败'), 'error');
+        }
+    } catch (err) {
+        showUploadStatus('❌ 网络错误: ' + err.message, 'error');
+    }
+}
+
+function showUploadStatus(msg, type) {
+    const el = document.getElementById('uploadStatus');
+    if (!el) return;
+    el.style.display = 'block';
+    el.textContent = msg;
+    el.className = 'upload-status ' + type;
+}
+
+// ============================================================
+// 更换文件对话框
+// ============================================================
+function showReplaceDialog() {
+    // 构造一个隐藏的 file input
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = async () => {
+        if (input.files.length > 0) {
+            // 检查是否有结果
+            try {
+                const checkResp = await fetch('/api/check-results');
+                const checkData = await checkResp.json();
+                if (checkData.has_results) {
+                    const confirmed = await showReplaceConfirmDialog(checkData.filename);
+                    if (!confirmed) return;
+                }
+            } catch (err) {}
+            await uploadFile(input.files[0]);
+        }
+    };
+    input.click();
+}
+
+function showReplaceConfirmDialog(filename) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `
+            <div class="modal-box">
+                <h3>⚠️ 确认替换文件</h3>
+                <p>当前活跃文件 <strong>${escapeHtml(filename)}</strong> 中已有测试执行结果。<br><br>
+                   上传新文件后将覆盖当前文件，<br><strong>已有执行结果将会丢失</strong>。<br>
+                   如需保留，请先备份原文件。</p>
+                <div class="modal-actions">
+                    <button class="btn-modal-ghost" id="modalCancel">取消</button>
+                    <button class="btn-modal-primary" id="modalConfirm"
+                            style="background:#dc2626;">确认替换</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#modalCancel').onclick = () => {
+            document.body.removeChild(overlay);
+            resolve(false);
+        };
+        overlay.querySelector('#modalConfirm').onclick = () => {
+            document.body.removeChild(overlay);
+            resolve(true);
+        };
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) { document.body.removeChild(overlay); resolve(false); }
+        });
+    });
+}
+
+// 全局都可以触发更换文件（从 topbar 按钮）
+async function triggerReplaceFile() {
+    if (dirty) {
+        const confirmed = await showUnsavedDialog();
+        if (!confirmed) return;
+    }
+    showReplaceDialog();
 }
 
 // ============================================================
@@ -1197,34 +1855,63 @@ function renderTestCase(tc) {
         </div>
 
         <div class="action-card">
-            <h3>\U0001f4dd 记录测试结果</h3>
+            <h3>&#9989; 测试结果</h3>
             <div class="result-group">
                 <button class="result-btn ${selectedResult === '通过' ? 'selected-pass' : ''}"
                         onclick="selectResult('通过', this)">
-                    <span class="result-emoji">✅</span>通过
+                    <span class="result-emoji">&#9989;</span>通过
                 </button>
                 <button class="result-btn ${selectedResult === '失败' ? 'selected-fail' : ''}"
                         onclick="selectResult('失败', this)">
-                    <span class="result-emoji">❌</span>失败
+                    <span class="result-emoji">&#10060;</span>失败
                 </button>
                 <button class="result-btn ${selectedResult === '阻塞' ? 'selected-block' : ''}"
                         onclick="selectResult('阻塞', this)">
-                    <span class="result-emoji">\U0001f6ab</span>阻塞
+                    <span class="result-emoji">&#128683;</span>阻塞
                 </button>
                 <button class="result-btn ${selectedResult === '跳过' ? 'selected-skip' : ''}"
                         onclick="selectResult('跳过', this)">
-                    <span class="result-emoji">⏭️</span>跳过
+                    <span class="result-emoji">&#9193;</span>跳过
                 </button>
             </div>
 
-            <h3 style="margin-bottom:8px">\U0001f4ac 测试现象备注</h3>
+            <h3 style="margin-bottom:8px">&#128221; 实际结果</h3>
             <textarea class="remark-area" id="remarkInput"
                       placeholder="请描述测试执行过程中的实际现象、发现的问题等..."
-                      oninput="markDirty()">${escapeHtml(tc._saved_remark || '')}</textarea>
+                      oninput="markDirty()">${escapeHtml(tc._saved_actual_result || '')}</textarea>
+
+            <!-- 新增字段 -->
+            <div class="extra-fields" style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div>
+                    <label class="extra-label">&#128100; 测试人员</label>
+                    <input type="text" class="extra-input" id="inputTester" placeholder="填写测试人员姓名"
+                           value="${escapeHtml(tc._saved_tester || '')}" oninput="markDirty()">
+                </div>
+                <div>
+                    <label class="extra-label">&#128030; BugID</label>
+                    <input type="text" class="extra-input" id="inputBugId" placeholder="如 PROJ-001"
+                           value="${escapeHtml(tc._saved_bug_id || '')}" oninput="markDirty()">
+                </div>
+                <div>
+                    <label class="extra-label">&#128257; Bug频率</label>
+                    <select class="extra-input" id="inputBugFreq" onchange="markDirty()">
+                        <option value="">-- 请选择 --</option>
+                        <option value="必现" ${tc._saved_bug_frequency === '必现' ? 'selected' : ''}>必现</option>
+                        <option value="高频" ${tc._saved_bug_frequency === '高频' ? 'selected' : ''}>高频</option>
+                        <option value="偶现" ${tc._saved_bug_frequency === '偶现' ? 'selected' : ''}>偶现</option>
+                        <option value="1次" ${tc._saved_bug_frequency === '1次' ? 'selected' : ''}>1次</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="extra-label">&#128339; 问题时间</label>
+                    <input type="text" class="extra-input" id="inputIssueTime" placeholder="选择失败时自动记录"
+                           value="${escapeHtml(tc._saved_issue_time || '')}" oninput="markDirty()">
+                </div>
+            </div>
 
             <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                 <button class="btn btn-save" id="btnSave" onclick="saveResult()">
-                    \U0001f4be 确认并保存
+                    &#128190; 确认并保存
                 </button>
                 <span id="saveStatus" style="font-size:13px;color:var(--text-secondary);"></span>
             </div>
@@ -1255,6 +1942,23 @@ function selectResult(value, btnEl) {
     document.querySelectorAll('.result-btn').forEach(b => b.className = 'result-btn');
     const classMap = {'通过':'selected-pass','失败':'selected-fail','阻塞':'selected-block','跳过':'selected-skip'};
     btnEl.className = 'result-btn ' + (classMap[value] || '');
+
+    // 失败时自动记录问题时间
+    if (value === '失败') {
+        const now = new Date();
+        const timeStr = now.getFullYear() + '-' +
+            String(now.getMonth()+1).padStart(2,'0') + '-' +
+            String(now.getDate()).padStart(2,'0') + ' ' +
+            String(now.getHours()).padStart(2,'0') + ':' +
+            String(now.getMinutes()).padStart(2,'0') + ':' +
+            String(now.getSeconds()).padStart(2,'0');
+        const issueInput = document.getElementById('inputIssueTime');
+        if (issueInput) issueInput.value = timeStr;
+    } else {
+        // 非失败时清空问题时间
+        const issueInput = document.getElementById('inputIssueTime');
+        if (issueInput) issueInput.value = '';
+    }
 }
 
 function resultCss(r) {
@@ -1272,7 +1976,11 @@ async function saveResult() {
         showToast('请先选择测试结果', 'warn');
         return;
     }
-    const remark = document.getElementById('remarkInput').value.trim();
+    const actualResult = document.getElementById('remarkInput').value.trim();
+    const tester = document.getElementById('inputTester') ? document.getElementById('inputTester').value.trim() : '';
+    const bugId = document.getElementById('inputBugId') ? document.getElementById('inputBugId').value.trim() : '';
+    const bugFreq = document.getElementById('inputBugFreq') ? document.getElementById('inputBugFreq').value : '';
+    const issueTime = document.getElementById('inputIssueTime') ? document.getElementById('inputIssueTime').value.trim() : '';
     const btnSave = document.getElementById('btnSave');
     const saveStatus = document.getElementById('saveStatus');
     btnSave.disabled = true;
@@ -1282,7 +1990,12 @@ async function saveResult() {
         const resp = await fetch('/api/save', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({index:currentIndex, result:selectedResult, remark:remark}),
+            body:JSON.stringify({
+                index:currentIndex, result:selectedResult,
+                actual_result: actualResult,
+                tester: tester, bug_id: bugId,
+                bug_frequency: bugFreq, issue_time: issueTime,
+            }),
         });
         const data = await resp.json();
         if (data.success) {
@@ -1298,7 +2011,7 @@ async function saveResult() {
         showToast('❌ 网络错误: ' + err.message, 'error');
     } finally {
         btnSave.disabled = false;
-        btnSave.textContent = '\U0001f4be 确认并保存';
+        btnSave.textContent = '💾 确认并保存';
     }
 }
 
@@ -1396,7 +2109,7 @@ function renderSearchResults(data) {
     if (results.length === 0) {
         container.innerHTML = `
             <div class="state-message">
-                <div class="icon">\U0001f50d</div>
+                <div class="icon">&#128269;</div>
                 <h2>无匹配结果</h2>
                 <p>尝试更换关键词或放宽筛选条件</p>
             </div>`;
@@ -1601,7 +2314,7 @@ function renderSummary(data) {
     // 按模块汇总
     const modKeys = Object.keys(by_module).sort();
     if (modKeys.length > 0) {
-        html += `<div class="summary-table-wrap"><h3>\U0001f4c1 按模块分布</h3>
+        html += `<div class="summary-table-wrap"><h3>&#128193; 按模块分布</h3>
         <table class="summary-table">
             <tr><th>模块</th><th>用例数</th><th style="color:var(--pass)">通过</th><th style="color:var(--fail)">失败</th><th style="color:var(--block)">阻塞</th><th>跳过</th><th>未执行</th><th>进度</th></tr>`;
         for (const m of modKeys) {
@@ -1682,6 +2395,55 @@ function escapeHtml(str) {
 }
 
 // ============================================================
+// 刷新数据（重新加载 Excel）
+// ============================================================
+async function reloadData() {
+    const btn = document.getElementById('btnReload');
+    btn.disabled = true;
+    btn.textContent = '⏳ 刷新中...';
+
+    try {
+        const resp = await fetch('/api/reload');
+        const data = await resp.json();
+
+        if (data.success) {
+            totalCount = data.total;
+            document.getElementById('topbarFilename').textContent =
+                '📂 ' + (data.filename || '已加载');
+            document.getElementById('progressWrap').style.display = 'block';
+            document.getElementById('navBar').style.display = 'flex';
+            document.getElementById('navHint').style.display = 'block';
+
+            // 重置到第一条
+            currentIndex = 0;
+            selectedResult = '';
+            dirty = false;
+
+            await refreshStatuses();
+            await loadTestCase(0);
+
+            // 如果当前在搜索或汇总页，也刷新
+            if (currentView === 'search') {
+                await loadFilterOptions();
+                searchPage = 0;
+                await _doSearch();
+            } else if (currentView === 'summary') {
+                await loadSummary();
+            }
+
+            showToast('✅ 已刷新！共 ' + data.total + ' 条用例', 'success');
+        } else {
+            showToast('❌ 刷新失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (err) {
+        showToast('❌ 刷新失败: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '↻ 刷新';
+    }
+}
+
+// ============================================================
 // 键盘快捷键
 // ============================================================
 document.addEventListener('keydown', function(e) {
@@ -1702,6 +2464,94 @@ document.addEventListener('keydown', function(e) {
 });
 
 // ============================================================
+// 问题列表
+// ============================================================
+async function loadIssues() {
+    const container = document.getElementById('issuesContainer');
+    container.innerHTML = '<div class="state-message"><div class="icon">⏳</div><h2>加载中...</h2></div>';
+
+    try {
+        const resp = await fetch('/api/all-status');
+        const statuses = await resp.json();
+        const total = statuses.length;
+
+        // 收集失败和阻塞的用例
+        const issueIndices = [];
+        for (let i = 0; i < statuses.length; i++) {
+            if (statuses[i] === '失败' || statuses[i] === '阻塞') {
+                issueIndices.push({index: i, result: statuses[i]});
+            }
+        }
+
+        if (issueIndices.length === 0) {
+            // 全部通过！展示庆祝动画
+            showCelebrate(container);
+            return;
+        }
+
+        // 有失败/阻塞的用例，展示列表
+        let html = '<div style="margin-bottom:16px;">';
+        html += '<h3 style="margin-bottom:8px;">&#9888; 共 ' + issueIndices.length + ' 条需要关注</h3>';
+        html += '<p style="font-size:13px;color:var(--text-secondary);">以下用例未通过，修复后可在此页面进行回归测试</p>';
+        html += '</div>';
+        html += '<div class="issue-list">';
+
+        for (const item of issueIndices) {
+            try {
+                const tcResp = await fetch('/api/testcase/' + item.index);
+                const tc = await tcResp.json();
+                html += '<div class="issue-item" onclick="jumpToExecute(' + item.index + ')">';
+                html += '<div class="issue-header">';
+                html += '<span class="issue-id">' + escapeHtml(tc.id || tc.col_0 || '#' + (item.index+1)) + '</span>';
+                html += '<span class="result-badge result-badge-' + resultCss(item.result) + '">' + escapeHtml(item.result) + '</span>';
+                html += '</div>';
+                html += '<div class="issue-title">' + escapeHtml(tc.title || tc.col_2 || '(无标题)') + '</div>';
+                html += '<div class="issue-meta">';
+                if (tc.module) html += '<span>&#128193; ' + escapeHtml(tc.module) + '</span>';
+                if (tc.priority) html += '<span>&#9889; ' + escapeHtml(tc.priority) + '</span>';
+                html += '<span>#' + (item.index + 1) + '</span>';
+                html += '</div>';
+                html += '</div>';
+            } catch (e) {
+                // skip individual errors
+            }
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = '<div class="state-message"><div class="icon">&#10060;</div><h2>加载失败</h2></div>';
+    }
+}
+
+function showCelebrate(container) {
+    const colors = ['#22c55e','#4f46e5','#f59e0b','#ef4444','#3b82f6','#8b5cf6','#ec4899','#14b8a6'];
+    let confettiHtml = '';
+    for (let i = 0; i < 60; i++) {
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const dx = (Math.random() - 0.5) * 400;
+        const dy = -(Math.random() * 300 + 50);
+        const rot = (Math.random() - 0.5) * 720;
+        const delay = Math.random() * 1.5;
+        const size = 6 + Math.random() * 10;
+        confettiHtml += '<div class="confetti" style="background:' + color +
+            ';width:' + size + 'px;height:' + size + 'px' +
+            ';left:50%;top:50%' +
+            ';--dx:' + dx + 'px' +
+            ';--dy:' + dy + 'px' +
+            ';--rot:' + rot + 'deg' +
+            ';animation-delay:' + delay + 's' +
+            ';"></div>';
+    }
+
+    container.innerHTML = '<div class="celebrate-wrap">' +
+        confettiHtml +
+        '<div style="font-size:64px;z-index:1;">&#127881;</div>' +
+        '<div class="celebrate-text">恭喜！所有测试全部通过！</div>' +
+        '<div class="celebrate-sub">&#127942; 所有用例执行完毕且无失败、无阻塞，测试任务圆满完成</div>' +
+        '</div>';
+}
+
+// ============================================================
 // 启动
 // ============================================================
 init();
@@ -1717,40 +2567,37 @@ init();
 # ============================================================
 def main():
     print("=" * 50)
-    print("  \U0001f52c 测试用例记录表  v1.1")
+    print("  🔬 测试用例记录表  v1.3")
     print("=" * 50)
     print()
 
     filepath = find_excel_file()
     if filepath is None:
-        print("⚠️  未在 testcases/ 目录中找到 Excel 文件")
-        print("   请将测试用例 .xlsx 文件放入 testcases/ 文件夹后重新启动")
+        print("📋 未找到活跃文件，将在网页中引导上传")
+        print("   首次使用请在浏览器中上传测试用例 Excel")
         print()
-        print("   按回车键退出...")
-        input()
     else:
-        print(f"\U0001f4c2 找到文件: {filepath.name}")
+        print(f"\U0001f4c2 找到活跃文件: {read_memory() or filepath.name}")
         try:
-            testcases, mapping, headers = read_testcases(filepath)
+            testcases, mapping, headers, sheet_name, header_row = read_testcases(filepath)
             STATE['testcases'] = testcases
             STATE['mapping'] = mapping
             STATE['headers'] = headers
+            STATE['sheet_name'] = sheet_name
+            STATE['header_row'] = header_row
             STATE['filepath'] = str(filepath)
             STATE['filename'] = filepath.name
 
             print(f"\U0001f4ca 共读取 {len(testcases)} 条测试用例")
             if mapping:
                 recognized = [k for k in mapping if k != '_headers']
-                print(f"\U0001f50d 识别到的字段: {', '.join(recognized)}")
+                if recognized:
+                    print(f"\U0001f50d 识别到的字段: {', '.join(recognized)}")
             print()
         except Exception as e:
             print(f"❌ 读取 Excel 失败: {e}")
+            print("   将在网页中引导重新上传")
             print()
-            print("   请检查:")
-            print("   1. Excel 文件是否已损坏")
-            print("   2. Excel 是否被其他程序占用")
-            print("   按回车键退出...")
-            input()
 
     print(f"\U0001f310 正在启动本地服务 (http://127.0.0.1:{PORT}) ...")
     print()
