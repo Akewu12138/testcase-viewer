@@ -47,6 +47,10 @@
 
 ## 版本履历
 
+### v1.3.4 (2026-07-05)
+- 新增规则：`save_result` 写入 SAVE_COLUMNS（测试结果/实际结果等列名），`read_testcases`/`all-status` 回读时按 SAVE_COLUMNS 精确列名匹配 + STATE 中的 sheet_name + header_row，不再依赖 COLUMN_PATTERNS 模糊匹配
+- **_pick_best_sheet 过滤规则**：只有命中 ≥ 3 个 COLUMN_PATTERNS 核心字段的 Sheet 才视为用例 Sheet，其余（说明/汇总/统计等补充 Sheet）自动跳过
+
 ### v1.3.1 (2026-07-05)
 **问题修复：**
 - Q1: 验证确认 Excel 写入逻辑正确（save_result 含 sheet_name + header_row）
