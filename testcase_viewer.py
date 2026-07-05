@@ -332,8 +332,8 @@ def _pick_best_sheet(wb):
         mapping = detect_columns(header_row_vals)
         core_count = len([f for f in mapping if f in CORE_FIELDS])
 
-        # 必须有 ≥ 2 个核心字段才算用例 Sheet
-        if core_count < 2:
+        # 必须有 ≥ 3 个核心字段才算用例 Sheet（排除统计/说明/汇总等补充 Sheet）
+        if core_count < 3:
             continue
 
         cnt = _count_data_rows(ws, header_idx)
@@ -2654,7 +2654,7 @@ init();
 # ============================================================
 def main():
     print("=" * 50)
-    print("  🔬 测试用例记录表  v1.3.3")
+    print("  🔬 测试用例记录表  v1.3.4")
     print("=" * 50)
     print()
 
