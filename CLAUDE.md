@@ -2,6 +2,12 @@
 
 > ⚠️ **本文档为项目最高指导文件，所有开发工作必须严格遵守本文档中的约定。**
 
+## Claude Code 行为约束
+
+- **禁止重复打开浏览器**：`open` 命令只需执行一次。如果 `open` 返回 exit code 0 或已执行过，不应再次调用。如果第一次没有弹出窗口，改用 `echo` 提示用户手动打开 URL。
+- **禁止死循环修复**：同一个 bug 修复后验证不超过 3 次。如果修复 3 次仍未解决，应停下来分析根因而非继续尝试。
+- **工具调用上限**：同一工具（如 `open`）在同一轮对话中连续调用不超过 3 次。
+
 ---
 
 ## 〇、用户决策记录（DR — Decision Record）
@@ -41,13 +47,30 @@
 
 ## 版本履历
 
-### v1.3 (2026-07-05)
-**Bug 修复：**
-- B1: 修复 HTML 实体 `&#x...` 乱码 → 统一使用十进制 `&#DDDD;` + JS textContent 用真实 Unicode
-- B2: 修复保存结果未写入 Excel → `save_result` 改用智能表头行号 + Sheet 名称匹配
-- B3: 修复 `read_testcases` 跳过了第一条数据行（off-by-one 错误）
+### v1.3.1 (2026-07-05)
+**问题修复：**
+- Q1: 验证确认 Excel 写入逻辑正确（save_result 含 sheet_name + header_row）
+- Q2: 「实际结果」列映射修复——remark_col patterns 最前面加入「实际结果」，优先匹配 Excel 中的实际结果列
+- Q3: 搜索结果展示用例名称——新增 name 字段（从 col_2/货架名称获取），搜索列表优先显示名称
+- Q4: 问题列表逻辑修正——全通过+全执行=庆祝动画，有失败/阻塞=问题列表，未完成且无问题=「暂无问题」
+- B4 (严重): 修复 loadIssues 函数末尾重复 catch 块和死代码，导致 JS 解析失败 (node --check SyntaxError)，前端所有交互功能不可用
+- **B5 (严重):** 修复 detect_columns 列映射覆盖 bug——后面列名会覆盖前面列名的映射，导致「实际结果」读到了原始「备注」列。改为每个字段只匹配第一个命中列
+- **B6:** 修复 result_col 误匹配原始 Excel 中的「Pass/Fail」列——从 COLUMN_PATTERNS 中移除「Pass/Fail」
+- **B7:** 修复 read_testcases 的「实际结果」「测试结果」列查找改用精确列名匹配（SAVE_COLUMNS），不再依赖 COLUMN_PATTERNS
 
-**新功能：**
+### v1.3.1 新增 Bug 修复总表
+
+| 编号 | 严重级别 | 问题 | 根因 | 修复 |
+|------|----------|------|------|------|
+| B4 | 严重 | App 完全不可用，所有前端交互无响应 | loadIssues 函数末尾有重复的死代码和 catch 块，node --check 报 SyntaxError | 删除重复代码块 |
+| B5 | 严重 | 用户保存的"实际结果"写入后被读到了原始"备注"列的内容 | detect_columns 遍历列时后面的列覆盖了前面的映射 | 加 matched_fields 集合，每个字段只匹配一次 |
+| B6 | 一般 | "测试结果"写入到了原始 Excel 的"Pass/Fail"列 | COLUMN_PATTERNS result_col 包含"Pass/Fail"导致误匹配 | 从 result_col patterns 移除"Pass/Fail" |
+| B7 | 一般 | 读回时不使用程序写入的精确列名 | read_testcases 用 mapping 模糊匹配来读回数据 | 改用 SAVE_COLUMNS 精确列名匹配；all-status 改用 STATE 中的 sheet_name 和 header_row |
+| B8 | 一般 | testcases 中有 Excel 但不叫 _active.xlsx 时程序不识别，启动后显示空上传页 | find_excel_file 只判断 _active.xlsx | 降级逻辑：无 _active.xlsx 时自动把第一个 Excel 复制为 _active.xlsx |
+| B9 | 一般 | read_testcases 和 save_result 可能选不同 Sheet 导致写入和读回不一致 | _pick_best_sheet 只看数据行数 | 优先选择已有「测试结果」列的 Sheet |
+| B10 | 一般 | 程序创建 _active.xlsx 副本导致用户困惑「为什么原始 Excel 没更新」 | find_excel_file 降级逻辑复制了一份 _active.xlsx | 方案 A: 直接读写原始 Excel，不再创建 _active.xlsx 副本 |
+
+### v1.3 (2026-07-05)
 - F1: 「测试现象备注」→「实际结果」，「记录测试结果」→「测试结果」
 - F2: 新增 测试人员、BugID、Bug频率（必现/高频/偶现/1次）、问题时间 四个记录字段
 - F3: 选择「失败」自动记录当前时间 → 问题时间；改为其他结果时清空

@@ -73,8 +73,8 @@ COLUMN_PATTERNS = {
     'priority':     ['优先级', '重要程度', '严重程度', 'P级', '重要级别'],
     'module':       ['所属模块', '模块', '功能模块', '测试模块', '需求模块', '系统模块'],
     'category':     ['用例类型', '测试类型', '测试分类', '分类'],
-    'result_col':   ['测试结果', '执行结果', 'Pass/Fail'],
-    'remark_col':   ['备注', '测试现象备注', '测试备注', '执行备注'],
+    'result_col':   ['测试结果', '执行结果'],
+    'remark_col':   ['实际结果'],
 }
 
 # 保存时写入的列名（如 Excel 中没有则自动新建）
@@ -90,13 +90,30 @@ ACTIVE_PATH = TESTCASES_DIR / ACTIVE_FILENAME
 
 
 def find_excel_file():
-    """只找 _active.xlsx（唯一的活跃文件）"""
+    """在 testcases 目录中查找 Excel 文件。
+    优先读 _memory.json 中记录的文件，其次找第一个 Excel。"""
     if not TESTCASES_DIR.exists():
         TESTCASES_DIR.mkdir(parents=True)
         return None
-    if ACTIVE_PATH.exists():
-        return ACTIVE_PATH
-    return None
+
+    # 收集所有 Excel 文件
+    excels = []
+    for pattern in ['*.xlsx', '*.xls']:
+        for f in TESTCASES_DIR.glob(pattern):
+            if not f.name.startswith('~$') and not f.name.startswith('.'):
+                excels.append(f)
+
+    if not excels:
+        return None
+
+    # 优先用记忆中的文件
+    remembered = read_memory()
+    for f in excels:
+        if f.name == remembered:
+            return f
+
+    # 降级：返回第一个
+    return excels[0]
 
 
 def read_memory():
@@ -169,8 +186,10 @@ def has_test_results():
 
 def detect_columns(headers):
     """将 Excel 表头智能映射到标准字段。
-    优先精确匹配，避免模糊匹配的交叉误匹配。"""
+    优先精确匹配，避免模糊匹配的交叉误匹配。
+    每个字段只匹配第一个命中的列（避免后面的列覆盖前面的）。"""
     mapping = {}
+    matched_fields = set()
     for i, h in enumerate(headers):
         h_str = str(h).strip() if h else ''
         if h_str == '':
@@ -179,8 +198,11 @@ def detect_columns(headers):
         # 第一遍：只做精确匹配
         matched = False
         for field, patterns in COLUMN_PATTERNS.items():
+            if field in matched_fields:
+                continue
             if h_str in patterns:
                 mapping[field] = i
+                matched_fields.add(field)
                 matched = True
                 break
         if matched:
@@ -189,11 +211,14 @@ def detect_columns(headers):
         # 第二遍：模糊匹配（表头包含模式关键词 或 模式词包含表头）
         # 但仅在关键词长度 >= 3 时才模糊匹配，避免 "ID" 等短词误匹配
         for field, patterns in COLUMN_PATTERNS.items():
+            if field in matched_fields:
+                continue
             for pat in patterns:
                 if len(pat) < 3:
                     continue  # 太短的关键词不做模糊匹配
                 if pat in h_str or h_str in pat:
                     mapping[field] = i
+                    matched_fields.add(field)
                     matched = True
                     break
             if matched:
@@ -201,6 +226,14 @@ def detect_columns(headers):
 
     mapping['_headers'] = headers
     return mapping
+
+
+def _find_col_index(headers, column_name):
+    """在 header list 中查找精确列名，返回 0-based index，找不到返回 None"""
+    for i, h in enumerate(headers):
+        if h == column_name:
+            return i
+    return None
 
 
 def _find_header_row_for_file(filepath):
@@ -258,9 +291,11 @@ def _count_data_rows(ws, header_idx):
 
 def _pick_best_sheet(wb):
     """在多个 Sheet 中自动选择最佳的测试用例 Sheet。
-    策略：选数据行最多的那个（排除纯说明/汇总类 Sheet）。"""
+    优先选择已包含「测试结果」列的 Sheet（即用户正在填写的那个），
+    否则选数据行最多的那个。"""
     best_sheet = wb.active
     best_count = 0
+    best_has_result = False
 
     for sname in wb.sheetnames:
         ws = wb[sname]
@@ -285,9 +320,19 @@ def _pick_best_sheet(wb):
             continue
 
         cnt = _count_data_rows(ws, header_idx)
-        if cnt > best_count:
-            best_count = cnt
+
+        # 检查这个 sheet 是否已经有「测试结果」列
+        header_row_vals = [str(c).strip() if c is not None else '' for c in raw_rows[header_idx-1]]
+        has_result = (SAVE_COLUMNS['result'] in header_row_vals)
+
+        # 优先级：有测试结果列 > 数据行多
+        if has_result and not best_has_result:
             best_sheet = ws
+            best_count = cnt
+            best_has_result = True
+        elif has_result == best_has_result and cnt > best_count:
+            best_sheet = ws
+            best_count = cnt
 
     return best_sheet
 
@@ -317,8 +362,8 @@ def read_testcases(filepath):
     mapping = detect_columns(headers)
 
     # 找到结果和备注列
-    result_col_idx = mapping.get('result_col')
-    remark_col_idx = mapping.get('remark_col')
+    result_col_idx = _find_col_index(headers, SAVE_COLUMNS['result'])
+    remark_col_idx = _find_col_index(headers, SAVE_COLUMNS['actual_result'])
 
     # 解析数据行（从表头的下一行开始）
     testcases = []
@@ -522,7 +567,7 @@ def api_init():
         'loaded': len(STATE['testcases']) > 0,
         'filename': display_name,
         'total': len(STATE['testcases']),
-        'has_active': ACTIVE_PATH.exists(),
+        'has_active': find_excel_file() is not None,
     })
 
 
@@ -547,11 +592,16 @@ def api_all_status():
 
     try:
         wb = openpyxl.load_workbook(STATE['filepath'], data_only=True)
-        ws = wb.active
+        # 使用 STATE 中记录的 sheet_name，而不是 wb.active
+        sn = STATE.get('sheet_name')
+        ws = wb[sn] if sn else wb.active
+
+        # 使用 STATE 中记录的表头行号
+        header_row = STATE.get('header_row', 1)
 
         headers_row = [
-            str(ws.cell(row=1, column=c + 1).value).strip()
-            if ws.cell(row=1, column=c + 1).value is not None else ''
+            str(ws.cell(row=header_row, column=c + 1).value).strip()
+            if ws.cell(row=header_row, column=c + 1).value is not None else ''
             for c in range(ws.max_column)
         ]
 
@@ -653,6 +703,7 @@ def api_search():
             'index': i,
             'id': tc.get('id', ''),
             'title': tc.get('title', ''),
+            'name': tc.get('col_1', '') or tc.get('title', '') or tc.get('col_0', ''),  # 用例名称（优先从货架名称/标题取）
             'module': tc.get('module', ''),
             'priority': tc.get('priority', ''),
             'result': tc.get('_saved_result', ''),
@@ -872,22 +923,22 @@ def api_upload():
                 pass
             return jsonify({'success': False, 'error': errmsg}), 400
 
-        # 校验通过 → 覆盖 _active.xlsx
+        # 保存到 testcases 下，用原始文件名
         import shutil
-        shutil.move(tmp_path, str(ACTIVE_PATH))
+        dest_path = TESTCASES_DIR / file.filename
+        shutil.move(tmp_path, str(dest_path))
         tmp_path = None  # 已移动，不需要清理
 
         # 写入记忆
-        original_name = file.filename
-        write_memory(original_name)
+        write_memory(file.filename)
 
         # 重新解析
-        testcases, mapping, headers, sheet_name, header_row = read_testcases(ACTIVE_PATH)
+        testcases, mapping, headers, sheet_name, header_row = read_testcases(dest_path)
         STATE['testcases'] = testcases
         STATE['mapping'] = mapping
         STATE['headers'] = headers
-        STATE['filepath'] = str(ACTIVE_PATH)
-        STATE['filename'] = ACTIVE_FILENAME
+        STATE['filepath'] = str(dest_path)
+        STATE['filename'] = file.filename
         STATE['sheet_name'] = sheet_name
         STATE['header_row'] = header_row
 
@@ -2126,7 +2177,7 @@ function renderSearchResults(data) {
             ? `<span class="result-badge result-badge-${resultCss(r.result)}">${escapeHtml(r.result)}</span>`
             : '';
         const snippet = r.snippet ? highlightText(r.snippet, kw) : '';
-        const titleDisplay = kw ? highlightText(r.title, kw) : escapeHtml(r.title);
+        const titleDisplay = kw ? highlightText(r.name || r.title, kw) : escapeHtml(r.name || r.title);
         const idDisplay = r.id || '#' + (r.index + 1);
 
         html += `
@@ -2475,49 +2526,74 @@ async function loadIssues() {
         const statuses = await resp.json();
         const total = statuses.length;
 
-        // 收集失败和阻塞的用例
+        // 统计
+        let passCount = 0, failCount = 0, blockCount = 0, skipCount = 0, noneCount = 0;
         const issueIndices = [];
         for (let i = 0; i < statuses.length; i++) {
-            if (statuses[i] === '失败' || statuses[i] === '阻塞') {
-                issueIndices.push({index: i, result: statuses[i]});
-            }
+            const s = statuses[i];
+            if (s === '通过') passCount++;
+            else if (s === '失败') { failCount++; issueIndices.push({index: i, result: s}); }
+            else if (s === '阻塞') { blockCount++; issueIndices.push({index: i, result: s}); }
+            else if (s === '跳过') skipCount++;
+            else noneCount++;
         }
 
-        if (issueIndices.length === 0) {
-            // 全部通过！展示庆祝动画
+        // 判断逻辑:
+        // 1. 全部通过 (passCount == total) → 庆祝动画
+        // 2. 全部执行完毕且没有失败/阻塞 (noneCount == 0 && failCount == 0 && blockCount == 0) → 庆祝动画
+        // 3. 有失败或阻塞 → 展示问题列表
+        // 4. 还没执行完毕，且没有失败阻塞 → 暂无问题
+        const hasIssues = failCount > 0 || blockCount > 0;
+        const executed = total - noneCount;
+        const allPass = (passCount + skipCount === total && !hasIssues); // 通过+跳过=全部，没有失败阻塞
+
+        if (allPass && noneCount === 0) {
+            // 全部执行完毕且无失败阻塞 → 庆祝
             showCelebrate(container);
             return;
         }
 
-        // 有失败/阻塞的用例，展示列表
-        let html = '<div style="margin-bottom:16px;">';
-        html += '<h3 style="margin-bottom:8px;">&#9888; 共 ' + issueIndices.length + ' 条需要关注</h3>';
-        html += '<p style="font-size:13px;color:var(--text-secondary);">以下用例未通过，修复后可在此页面进行回归测试</p>';
-        html += '</div>';
-        html += '<div class="issue-list">';
+        if (hasIssues) {
+            // 有问题 → 展示列表
+            let html = '<div style="margin-bottom:16px;">';
+            html += '<h3 style="margin-bottom:8px;">&#9888; 共 ' + issueIndices.length + ' 条需要关注</h3>';
+            html += '<p style="font-size:13px;color:var(--text-secondary);">以下用例未通过，修复后可在此页面进行回归测试</p>';
+            html += '</div>';
+            html += '<div class="issue-list">';
 
-        for (const item of issueIndices) {
-            try {
-                const tcResp = await fetch('/api/testcase/' + item.index);
-                const tc = await tcResp.json();
-                html += '<div class="issue-item" onclick="jumpToExecute(' + item.index + ')">';
-                html += '<div class="issue-header">';
-                html += '<span class="issue-id">' + escapeHtml(tc.id || tc.col_0 || '#' + (item.index+1)) + '</span>';
-                html += '<span class="result-badge result-badge-' + resultCss(item.result) + '">' + escapeHtml(item.result) + '</span>';
-                html += '</div>';
-                html += '<div class="issue-title">' + escapeHtml(tc.title || tc.col_2 || '(无标题)') + '</div>';
-                html += '<div class="issue-meta">';
-                if (tc.module) html += '<span>&#128193; ' + escapeHtml(tc.module) + '</span>';
-                if (tc.priority) html += '<span>&#9889; ' + escapeHtml(tc.priority) + '</span>';
-                html += '<span>#' + (item.index + 1) + '</span>';
-                html += '</div>';
-                html += '</div>';
-            } catch (e) {
-                // skip individual errors
+            for (const item of issueIndices) {
+                try {
+                    const tcResp = await fetch('/api/testcase/' + item.index);
+                    const tc = await tcResp.json();
+                    html += '<div class="issue-item" onclick="jumpToExecute(' + item.index + ')">';
+                    html += '<div class="issue-header">';
+                    html += '<span class="issue-id">' + escapeHtml(tc.id || tc.col_0 || '#' + (item.index+1)) + '</span>';
+                    html += '<span class="result-badge result-badge-' + resultCss(item.result) + '">' + escapeHtml(item.result) + '</span>';
+                    html += '</div>';
+                    html += '<div class="issue-title">' + escapeHtml(tc.name || tc.title || tc.col_2 || '(无标题)') + '</div>';
+                    html += '<div class="issue-meta">';
+                    if (tc.module) html += '<span>&#128193; ' + escapeHtml(tc.module) + '</span>';
+                    if (tc.priority) html += '<span>&#9889; ' + escapeHtml(tc.priority) + '</span>';
+                    if (tc._saved_bug_id) html += '<span>&#128030; ' + escapeHtml(tc._saved_bug_id) + '</span>';
+                    if (tc._saved_issue_time) html += '<span>&#128339; ' + escapeHtml(tc._saved_issue_time) + '</span>';
+                    html += '<span>#' + (item.index + 1) + '</span>';
+                    html += '</div>';
+                    html += '</div>';
+                } catch (e) {
+                    // skip individual errors
+                }
             }
+            html += '</div>';
+            container.innerHTML = html;
+        } else {
+            // 还未执行完毕，且暂无失败阻塞 → 暂无问题
+            container.innerHTML = '<div class="state-message">' +
+                '<div class="icon">&#9989;</div>' +
+                '<h2>暂无问题</h2>' +
+                '<p>已执行 ' + executed + ' / ' + total + ' 条，目前没有失败或阻塞的用例。</p>' +
+                '<p style="font-size:13px;color:var(--text-secondary);margin-top:4px;">完成全部测试后将自动判断结果</p>' +
+                '</div>';
         }
-        html += '</div>';
-        container.innerHTML = html;
     } catch (err) {
         container.innerHTML = '<div class="state-message"><div class="icon">&#10060;</div><h2>加载失败</h2></div>';
     }
@@ -2567,7 +2643,7 @@ init();
 # ============================================================
 def main():
     print("=" * 50)
-    print("  🔬 测试用例记录表  v1.3")
+    print("  🔬 测试用例记录表  v1.3.3")
     print("=" * 50)
     print()
 

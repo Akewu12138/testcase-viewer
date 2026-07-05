@@ -36,3 +36,6 @@ __pycache__/
 # coverage 覆盖率报告
 /htmlcov/
 /.coverage
+# 活跃文件（用户本地数据，不上传）
+testcases/_active.xlsx
+testcases/_memory.json
