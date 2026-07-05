@@ -290,12 +290,19 @@ def _count_data_rows(ws, header_idx):
 
 
 def _pick_best_sheet(wb):
-    """在多个 Sheet 中自动选择最佳的测试用例 Sheet。
-    优先选择已包含「测试结果」列的 Sheet（即用户正在填写的那个），
-    否则选数据行最多的那个。"""
+    """在多个 Sheet 中自动选择真正的测试用例 Sheet。
+    判断标准：
+      1. 必须具备 ≥ 2 个核心用例字段（id/steps/expected/precondition/priority 等）
+      2. 优先选已含「测试结果」列的 Sheet（说明用户已在填写）
+      3. 同条件下选核心字段数量最多的那个
+      4. 再同条件下选数据行最多的那个
+    不满足条件 1 的 Sheet 视为补充说明，不会被选中。
+    """
+    CORE_FIELDS = {'id', 'title', 'steps', 'expected', 'precondition',
+                   'purpose', 'priority', 'module', 'category', 'result_col', 'remark_col'}
+
     best_sheet = wb.active
-    best_count = 0
-    best_has_result = False
+    best_score = (-1, False, 0)   # (core_field_count, has_result, data_rows)
 
     for sname in wb.sheetnames:
         ws = wb[sname]
@@ -303,7 +310,7 @@ def _pick_best_sheet(wb):
         if len(raw_rows) < 2:
             continue
 
-        # 找表头
+        # 定位表头行
         header_idx = None
         for i, row in enumerate(raw_rows):
             filled = sum(1 for c in row if c is not None and str(c).strip())
@@ -319,20 +326,24 @@ def _pick_best_sheet(wb):
         if header_idx is None:
             continue
 
-        cnt = _count_data_rows(ws, header_idx)
+        header_row_vals = [str(c).strip() if c is not None else '' for c in raw_rows[header_idx - 1]]
 
-        # 检查这个 sheet 是否已经有「测试结果」列
-        header_row_vals = [str(c).strip() if c is not None else '' for c in raw_rows[header_idx-1]]
+        # 通过 detect_columns 识别有几个核心字段
+        mapping = detect_columns(header_row_vals)
+        core_count = len([f for f in mapping if f in CORE_FIELDS])
+
+        # 必须有 ≥ 2 个核心字段才算用例 Sheet
+        if core_count < 2:
+            continue
+
+        cnt = _count_data_rows(ws, header_idx)
         has_result = (SAVE_COLUMNS['result'] in header_row_vals)
 
-        # 优先级：有测试结果列 > 数据行多
-        if has_result and not best_has_result:
+        # 比较：核心字段数 > 有无结果列 > 数据行数
+        score = (core_count, has_result, cnt)
+        if score > best_score:
+            best_score = score
             best_sheet = ws
-            best_count = cnt
-            best_has_result = True
-        elif has_result == best_has_result and cnt > best_count:
-            best_sheet = ws
-            best_count = cnt
 
     return best_sheet
 
