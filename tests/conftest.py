@@ -133,26 +133,30 @@ def sample_mapping(sample_headers):
 @pytest.fixture
 def sample_testcase(sample_workbook, sample_headers):
     """返回一条已解析的测试用例 dict"""
-    testcases, mapping, headers = read_testcases(sample_workbook)
+    testcases, mapping, headers, _, _ = read_testcases(sample_workbook)
     return testcases[0]
 
 
 @pytest.fixture
 def populated_state(sample_workbook):
-    """预填充 STATE 以便测试 API"""
-    testcases, mapping, headers = read_testcases(sample_workbook)
+    """预填充 STATE 以便测试 API（模拟真实加载后的完整 STATE）"""
+    testcases, mapping, headers, sheet_name, header_row = read_testcases(sample_workbook)
     original = {
         'testcases': STATE['testcases'],
         'mapping': STATE['mapping'],
         'headers': STATE['headers'],
         'filepath': STATE['filepath'],
         'filename': STATE['filename'],
+        'sheet_name': STATE['sheet_name'],
+        'header_row': STATE['header_row'],
     }
     STATE['testcases'] = testcases
     STATE['mapping'] = mapping
     STATE['headers'] = headers
     STATE['filepath'] = sample_workbook
     STATE['filename'] = 'test_cases.xlsx'
+    STATE['sheet_name'] = sheet_name
+    STATE['header_row'] = header_row
     yield STATE
     # 还原
     STATE['testcases'] = original['testcases']
@@ -160,3 +164,5 @@ def populated_state(sample_workbook):
     STATE['headers'] = original['headers']
     STATE['filepath'] = original['filepath']
     STATE['filename'] = original['filename']
+    STATE['sheet_name'] = original['sheet_name']
+    STATE['header_row'] = original['header_row']

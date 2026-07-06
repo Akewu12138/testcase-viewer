@@ -98,7 +98,7 @@ class TestBuildDisplayFields:
         assert any('测试目的' in l for l in labels)
 
     def test_empty_fields_excluded(self, sample_mapping):
-        """空值字段不出现在展示列表中（前置条件为空时不显示）"""
+        """空值字段仍会出现在展示列表中，但值为空字符串（实现已改为全列展示）"""
         tc = {'id': 'TC001', 'title': '测试', '_row': 2}
         for i in range(10):
             tc[f'col_{i}'] = ''
@@ -109,12 +109,13 @@ class TestBuildDisplayFields:
         title_shown = any('用例标题' in f['label'] for f in fields)
         assert id_shown
         assert title_shown
-        # precondition 为空不应该出现
-        pre_shown = any('前置条件' in f['label'] for f in fields)
-        assert not pre_shown
+        # precondition 映射存在 → 字段仍出现，但值为空（不省略）
+        pre_field = next((f for f in fields if '前置条件' in f['label']), None)
+        assert pre_field is not None     # 字段出现
+        assert pre_field['value'] == ''  # 但值为空
 
-    def test_result_columns_excluded(self, sample_testcase, sample_mapping):
-        """结果列不出现在展示字段中"""
+    def test_result_columns_shown(self, sample_testcase, sample_mapping):
+        """结果列/备注列现在会出现在展示字段中（实现已改为全列展示，不省略）"""
         headers = ["编号", "标题", "测试结果", "测试现象备注", "执行时间"]
         tc = {
             'id': 'TC001', 'title': '测试', '_row': 2,
@@ -125,9 +126,12 @@ class TestBuildDisplayFields:
         }
         mapping = detect_columns(headers)
         fields = build_display_fields(tc, mapping, headers)
-        for f in fields:
-            assert '测试结果' not in f['label']
-            assert '测试现象备注' not in f['label']
+        # 实现已改为全列展示：结果列、备注列都会出现且值正确
+        result_field = next((f for f in fields if '测试结果' in f['label']), None)
+        remark_field = next((f for f in fields if '测试现象备注' in f['label']), None)
+        assert result_field is not None
+        assert result_field['value'] == '通过'
+        assert remark_field is not None
 
 
 # ============================================================
@@ -139,7 +143,7 @@ class TestReadTestcases:
 
     def test_read_valid_file(self, sample_workbook):
         """正常 Excel 文件 → 正确解析出所有用例"""
-        testcases, mapping, headers = read_testcases(sample_workbook)
+        testcases, mapping, headers, _, _ = read_testcases(sample_workbook)
         assert len(testcases) == 3
         assert testcases[0]['id'] == 'TC001'
         assert testcases[0]['title'] == '登录功能测试'
@@ -153,12 +157,12 @@ class TestReadTestcases:
         ws.cell(row=1, column=2, value="标题")
         filepath = tmp_path / "empty.xlsx"
         wb.save(str(filepath))
-        testcases, mapping, headers = read_testcases(str(filepath))
+        testcases, mapping, headers, _, _ = read_testcases(str(filepath))
         assert len(testcases) == 0
 
     def test_search_text_built(self, sample_workbook):
         """_search_text 包含所有字段用于全文搜索"""
-        testcases, _, _ = read_testcases(sample_workbook)
+        testcases, _, _, _, _ = read_testcases(sample_workbook)
         tc = testcases[0]
         assert 'TC001' in tc['_search_text']
         assert '登录功能测试' in tc['_search_text']
@@ -170,31 +174,41 @@ class TestReadTestcases:
 
 
 class TestSaveResult:
-    """测试 save_result() — 保存测试结果"""
+    """测试 save_result() — 保存测试结果
+
+    注意：save_result 当前签名需要 header_row_idx 与 sheet_name，
+    以及 actual_result（取代旧版 remark）、tester、bug_id、bug_frequency、issue_time。
+    """
 
     def test_save_new_result(self, sample_workbook):
         """首次保存结果 → 自动创建结果列并写入"""
-        save_result(sample_workbook, row_number=2, result="通过", remark="一切正常")
+        save_result(
+            sample_workbook, row_number=2, header_row_idx=1, sheet_name="测试用例",
+            result="通过", actual_result="一切正常",
+            tester="", bug_id="", bug_frequency="", issue_time="",
+        )
 
         # 验证写入内容
         wb = openpyxl.load_workbook(sample_workbook, data_only=True)
         ws = wb.active
-        # 找到结果列
         headers = [ws.cell(row=1, column=c + 1).value for c in range(ws.max_column)]
         assert "测试结果" in headers
-        assert "测试现象备注" in headers
+        assert "实际结果" in headers
         assert "执行时间" in headers
 
         result_col = headers.index("测试结果") + 1
-        remark_col = headers.index("测试现象备注") + 1
+        actual_col = headers.index("实际结果") + 1
         assert ws.cell(row=2, column=result_col).value == "通过"
-        assert ws.cell(row=2, column=remark_col).value == "一切正常"
+        assert ws.cell(row=2, column=actual_col).value == "一切正常"
         wb.close()
 
     def test_save_to_existing_columns(self, sample_workbook_with_results):
         """已有结果列的 Excel → 覆盖写入"""
-        save_result(sample_workbook_with_results, row_number=3,
-                    result="阻塞", remark="网络不通")
+        save_result(
+            sample_workbook_with_results, row_number=3, header_row_idx=1, sheet_name="Sheet",
+            result="阻塞", actual_result="网络不通",
+            tester="", bug_id="", bug_frequency="", issue_time="",
+        )
 
         wb = openpyxl.load_workbook(sample_workbook_with_results, data_only=True)
         ws = wb.active
@@ -205,9 +219,11 @@ class TestSaveResult:
 
     def test_save_multiple_results(self, sample_workbook):
         """多次保存不同行 → 互不覆盖"""
-        save_result(sample_workbook, row_number=2, result="通过", remark="OK")
-        save_result(sample_workbook, row_number=3, result="失败", remark="报错")
-        save_result(sample_workbook, row_number=4, result="跳过", remark="")
+        base = dict(header_row_idx=1, sheet_name="测试用例",
+                    tester="", bug_id="", bug_frequency="", issue_time="")
+        save_result(sample_workbook, row_number=2, result="通过", actual_result="OK", **base)
+        save_result(sample_workbook, row_number=3, result="失败", actual_result="报错", **base)
+        save_result(sample_workbook, row_number=4, result="跳过", actual_result="", **base)
 
         wb = openpyxl.load_workbook(sample_workbook, data_only=True)
         ws = wb.active
