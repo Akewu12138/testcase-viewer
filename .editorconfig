@@ -1,0 +1,21 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# 前端文件用 2 空格缩进
+[*.{js,css,html,json,yml,yaml}]
+indent_size = 2
+
+# Markdown 保留行尾空格（双空格=换行）
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefile 必须用 tab
+[Makefile]
+indent_style = tab
