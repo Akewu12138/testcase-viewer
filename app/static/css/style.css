@@ -487,6 +487,38 @@ select.extra-input{appearance:none;background-image:url("data:image/svg+xml,%3Cs
 
 .highlight{background:var(--color-primary-soft);padding:0 2px;border-radius:var(--radius-xs);color:var(--color-primary-active);}
 
+/* ========== Clarity 用例卡片（阶段2 新增） ========== */
+.case-card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);box-shadow:var(--shadow-xs);overflow:hidden;margin-bottom:var(--space-4)}
+.case-head{padding:20px 24px 16px;border-bottom:1px solid var(--color-border-light);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.case-nav{font-size:var(--text-sm);color:var(--color-text-secondary);display:flex;align-items:center;gap:8px;margin-top:8px}
+.case-nav strong{color:var(--color-primary);font-size:var(--text-md);font-weight:700;font-variant-numeric:tabular-nums}
+.case-body{padding:8px 24px 20px}
+.case-id{font-family:var(--font-mono);font-size:var(--text-sm);display:inline-flex;align-items:center;padding:5px 12px;border-radius:var(--radius-full);color:var(--color-primary);background:var(--color-primary-light);font-weight:600;border:1px solid var(--color-border-light);font-variant-numeric:tabular-nums}
+.case-title{font-size:var(--text-lg);font-weight:700;line-height:1.4;letter-spacing:-0.01em}
+
+/* Clarity 字段（替代 field-row） */
+.field{padding:14px 0;border-bottom:1px solid var(--color-border-light)}
+.field:last-child{border-bottom:none}
+
+/* Clarity 状态徽章 */
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:var(--radius-full);font-size:var(--text-xs);font-weight:600;white-space:nowrap}
+.badge-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
+.badge-pass{background:var(--color-success-light);color:var(--green-700)}
+.badge-fail{background:var(--color-danger-light);color:var(--red-700)}
+.badge-block{background:var(--color-warning-light);color:var(--amber-700)}
+.badge-skip{background:var(--color-surface-2);color:var(--color-text-secondary)}
+.badge-neutral{background:var(--color-surface-2);color:var(--color-text-secondary)}
+
+/* Clarity 操作区（替代 action-card） */
+.action-area{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:20px 24px;margin-bottom:var(--space-4);box-shadow:var(--shadow-xs)}
+.action-area h3{font-size:var(--text-sm);margin-bottom:14px;font-weight:600}
+
+/* Clarity 结果按钮选中态（sel-* 替代 selected-*） */
+.result-btn.sel-pass{border-color:var(--color-success);background:var(--color-success-light);color:var(--green-700)}
+.result-btn.sel-fail{border-color:var(--color-danger);background:var(--color-danger-light);color:var(--red-700)}
+.result-btn.sel-block{border-color:var(--color-warning);background:var(--color-warning-light);color:var(--amber-700)}
+.result-btn.sel-skip{border-color:var(--color-neutral);background:var(--color-surface-2);color:var(--color-text-secondary)}
+
 /* ========== 响应式 ========== */
 @media(max-width:760px){
     .topbar{padding:0 var(--space-3);height:52px;margin:var(--space-3) var(--space-3) 0;max-width:none;border-radius:var(--radius-md);}

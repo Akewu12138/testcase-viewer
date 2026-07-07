@@ -382,67 +382,73 @@ function renderTestCase(tc) {
             valueHtml = formatSteps(f.value);
         }
         fieldsHtml += `
-            <div class="field-row ${f.css_class}">
+            <div class="field ${f.css_class}">
                 <div class="field-label">${f.label}</div>
                 <div class="field-value">${valueHtml}</div>
             </div>`;
     }
 
-    const savedBadge = tc._saved_result
-        ? `<span class="result-badge result-badge-${resultCss(tc._saved_result)}">已执行: ${escapeHtml(tc._saved_result)}</span>`
-        : '';
+    const rc = tc._saved_result ? resultCss(tc._saved_result) : 'neutral';
+    const badgeColors = {'pass': 'success', 'fail': 'danger', 'block': 'warning', 'skip': 'neutral', 'neutral': 'neutral'};
+    const savedBadge = `<span class="badge badge-${rc}"><span class="badge-dot" style="background:var(--color-${badgeColors[rc] || 'neutral'})"></span>${escapeHtml(tc._saved_result || '未执行')}</span>`;
+
+    const titleVal = tc.title || tc.name || tc.col_2 || '(无标题)';
+    const idVal = tc.id || tc.col_0 || ('#' + (tc._index + 1));
 
     container.innerHTML = `
-        <div class="card">
-            <div class="card-header">
-                <div class="card-navigator">
-                    第 <strong>${tc._index + 1}</strong> 条 / 共 ${total} 条
+        <div class="case-card">
+            <div class="case-head">
+                <div>
+                    <div style="margin-bottom:10px"><span class="case-id">${escapeHtml(idVal)}</span></div>
+                    <div class="case-title">${escapeHtml(titleVal)}</div>
+                    <div class="case-nav">第 <strong>${tc._index + 1}</strong> 条 / 共 ${total} 条</div>
                 </div>
-                ${savedBadge}
+                <div style="text-align:right">
+                    ${savedBadge}
+                </div>
             </div>
-            <div class="card-body">${fieldsHtml}</div>
+            <div class="case-body">${fieldsHtml}</div>
         </div>
 
-        <div class="action-card">
-            <h3>&#9989; 测试结果</h3>
+        <div class="action-area">
+            <h3>执行结果</h3>
             <div class="result-group">
-                <button class="result-btn ${selectedResult === '通过' ? 'selected-pass' : ''}"
+                <button class="result-btn ${selectedResult === '通过' ? 'sel-pass' : ''}"
                         onclick="selectResult('通过', this)">
-                    <span class="result-emoji">&#9989;</span>通过
+                    <span class="result-emoji">&#10003;</span>通过
                 </button>
-                <button class="result-btn ${selectedResult === '失败' ? 'selected-fail' : ''}"
+                <button class="result-btn ${selectedResult === '失败' ? 'sel-fail' : ''}"
                         onclick="selectResult('失败', this)">
-                    <span class="result-emoji">&#10060;</span>失败
+                    <span class="result-emoji">&#10005;</span>失败
                 </button>
-                <button class="result-btn ${selectedResult === '阻塞' ? 'selected-block' : ''}"
+                <button class="result-btn ${selectedResult === '阻塞' ? 'sel-block' : ''}"
                         onclick="selectResult('阻塞', this)">
-                    <span class="result-emoji">&#128683;</span>阻塞
+                    <span class="result-emoji">&#8856;</span>阻塞
                 </button>
-                <button class="result-btn ${selectedResult === '跳过' ? 'selected-skip' : ''}"
+                <button class="result-btn ${selectedResult === '跳过' ? 'sel-skip' : ''}"
                         onclick="selectResult('跳过', this)">
-                    <span class="result-emoji">&#9193;</span>跳过
+                    <span class="result-emoji">&#8634;</span>跳过
                 </button>
             </div>
 
-            <h3 style="margin-bottom:8px">&#128221; 实际结果</h3>
+            <h3 style="margin-bottom:8px">实际结果</h3>
             <textarea class="remark-area" id="remarkInput"
                       placeholder="请描述测试执行过程中的实际现象、发现的问题等..."
                       oninput="markDirty()">${escapeHtml(tc._saved_actual_result || '')}</textarea>
 
-            <!-- 新增字段 -->
             <div class="extra-fields" style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                 <div>
-                    <label class="extra-label">&#128100; 测试人员</label>
+                    <label class="extra-label">测试人员</label>
                     <input type="text" class="extra-input" id="inputTester" placeholder="填写测试人员姓名"
                            value="${escapeHtml(tc._saved_tester || '')}" oninput="markDirty()">
                 </div>
                 <div>
-                    <label class="extra-label">&#128030; BugID</label>
+                    <label class="extra-label">BugID</label>
                     <input type="text" class="extra-input" id="inputBugId" placeholder="如 PROJ-001"
                            value="${escapeHtml(tc._saved_bug_id || '')}" oninput="markDirty()">
                 </div>
                 <div>
-                    <label class="extra-label">&#128257; Bug频率</label>
+                    <label class="extra-label">Bug频率</label>
                     <select class="extra-input" id="inputBugFreq" onchange="markDirty()">
                         <option value="">-- 请选择 --</option>
                         <option value="必现" ${tc._saved_bug_frequency === '必现' ? 'selected' : ''}>必现</option>
@@ -452,7 +458,7 @@ function renderTestCase(tc) {
                     </select>
                 </div>
                 <div>
-                    <label class="extra-label">&#128339; 问题时间</label>
+                    <label class="extra-label">问题时间</label>
                     <input type="text" class="extra-input" id="inputIssueTime" placeholder="选择失败时自动记录"
                            value="${escapeHtml(tc._saved_issue_time || '')}" oninput="markDirty()">
                 </div>
@@ -460,9 +466,9 @@ function renderTestCase(tc) {
 
             <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                 <button class="btn btn-save" id="btnSave" onclick="saveResult()">
-                    &#128190; 确认并保存
+                    确认并保存
                 </button>
-                <span id="saveStatus" style="font-size:13px;color:var(--text-secondary);"></span>
+                <span id="saveStatus" style="font-size:13px;color:var(--color-text-secondary);"></span>
             </div>
         </div>`;
 
@@ -489,7 +495,7 @@ function selectResult(value, btnEl) {
     selectedResult = value;
     markDirty();
     document.querySelectorAll('.result-btn').forEach(b => b.className = 'result-btn');
-    const classMap = {'通过':'selected-pass','失败':'selected-fail','阻塞':'selected-block','跳过':'selected-skip'};
+    const classMap = {'通过':'sel-pass','失败':'sel-fail','阻塞':'sel-block','跳过':'sel-skip'};
     btnEl.className = 'result-btn ' + (classMap[value] || '');
 
     // 失败时自动记录问题时间
