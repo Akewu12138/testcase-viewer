@@ -1,0 +1,30 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "globals": {
+    "Atomics": "readonly",
+    "SharedArrayBuffer": "readonly"
+  },
+  "parserOptions": {
+    "ecmaVersion": 2021,
+    "sourceType": "script"
+  },
+  "rules": {
+    "no-undef": "error",
+    "no-unused-vars": "warn",
+    "no-redeclare": "error",
+    "no-dupe-keys": "error",
+    "no-duplicate-case": "error",
+    "no-empty": "warn",
+    "no-console": "off",
+    "no-extra-semi": "error",
+    "no-unreachable": "error",
+    "valid-jsdoc": "off",
+    "semi": ["error", "always"],
+    "indent": ["error", 4],
+    "quotes": ["error", "single"]
+  },
+  "comment": "阶段4 补充：ESLint 配置。当前环境用 node --check 替代（语法检查），未来 npm install eslint 后可启用完整检查"
+}

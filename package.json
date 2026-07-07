@@ -1,0 +1,14 @@
+{
+  "name": "testcase-viewer-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "测试用例显示工具 - 前端 lint 配置（阶段4 补充）",
+  "scripts": {
+    "lint": "eslint app/static/js/",
+    "lint:fix": "eslint app/static/js/ --fix"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  },
+  "comment": "当前环境网络不通无法 npm install，暂用 node --check 做 JS 语法检查；未来有网络后 npm install 即可启用完整 ESLint"
+}
