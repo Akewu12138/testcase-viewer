@@ -1,0 +1,421 @@
+/* ========================================================================
+   TestCase Viewer · Clarity 设计系统 — 设计令牌层 (Design Tokens)
+   ------------------------------------------------------------------------
+   设计理念：Clarity · 清晰
+     · 信息优先 —— 数据是主角，UI 是配角
+     · 克制的精致 —— 减少装饰，强化层次
+     · 一致性 —— 统一的 8 点栅格与色阶
+     · 可访问性 —— 全量 WCAG AA 合规
+
+   分层架构：
+     Layer 1  原始色阶 (palette)     —— 不可直接使用，仅供语义层引用
+     Layer 2  语义令牌 (semantic)    —— 组件层唯一应引用的变量
+     Layer 3  基础重置 (base)        —— 盒模型、字体、滚动条
+
+   使用方式：组件样式只引用 --color-* / --text-* / --space-* 等语义令牌，
+            切换主题时仅覆盖语义令牌（见 [data-theme="dark"]）。
+   ======================================================================== */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* ========================================================================
+   Layer 1 · 原始色阶 (Palette)
+   不直接用于组件，仅供语义层引用，确保换肤只改一处。
+   ======================================================================== */
+:root {
+    /* —— 中性色 · Slate（比纯灰更有质感、色温更冷） —— */
+    --slate-50:  #f8fafc;
+    --slate-100: #f1f5f9;
+    --slate-200: #e2e8f0;
+    --slate-300: #cbd5e1;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-600: #475569;
+    --slate-700: #334155;
+    --slate-800: #1e293b;
+    --slate-900: #0f172a;
+    --slate-950: #020617;
+
+    /* —— 主色 · Indigo（区别于通用蓝，更现代、专业、有辨识度） —— */
+    --indigo-50:  #eef2ff;
+    --indigo-100: #e0e7ff;
+    --indigo-200: #c7d2fe;
+    --indigo-300: #a5b4fc;
+    --indigo-400: #818cf8;
+    --indigo-500: #6366f1;
+    --indigo-600: #4f46e5;
+    --indigo-700: #4338ca;
+    --indigo-800: #3730a3;
+    --indigo-900: #312e81;
+
+    /* —— 语义色阶 · Success / Warning / Danger —— */
+    --green-50:  #f0fdf4;
+    --green-100: #dcfce7;
+    --green-500: #22c55e;
+    --green-600: #16a34a;
+    --green-700: #15803d;
+
+    --amber-50:  #fffbeb;
+    --amber-100: #fef3c7;
+    --amber-500: #f59e0b;
+    --amber-600: #d97706;
+    --amber-700: #b45309;
+
+    --red-50:  #fef2f2;
+    --red-100: #fee2e2;
+    --red-500: #ef4444;
+    --red-600: #dc2626;
+    --red-700: #b91c1c;
+}
+
+/* ========================================================================
+   Layer 2 · 语义令牌 (Semantic Tokens) — 明色主题
+   组件层只引用这里的变量。切换主题只需在下方 dark 块覆盖同名变量。
+   ======================================================================== */
+:root {
+    /* —— 表面与背景 —— */
+    --color-bg:            var(--slate-50);   /* 页面底色 */
+    --color-surface:       #ffffff;           /* 卡片/容器表面 */
+    --color-surface-2:     var(--slate-100);  /* 次级表面（输入框底、表头） */
+    --color-surface-hover: var(--slate-50);   /* 可悬停表面 */
+
+    /* —— 文字 —— */
+    --color-text:           var(--slate-900); /* 主文字 */
+    --color-text-secondary: var(--slate-600); /* 次要文字 */
+    --color-text-tertiary:  var(--slate-400); /* 占位/辅助 */
+    --color-text-inverse:   #ffffff;          /* 深色背景上的文字 */
+
+    /* —— 边框 —— */
+    --color-border:        var(--slate-200);  /* 默认边框 */
+    --color-border-strong: var(--slate-300);  /* 强调边框（hover/聚焦） */
+    --color-border-light:  var(--slate-100);  /* 极淡分隔线 */
+
+    /* —— 主色（语义化） —— */
+    --color-primary:        var(--indigo-600);
+    --color-primary-hover:  var(--indigo-700);
+    --color-primary-active: var(--indigo-800);
+    --color-primary-light:  var(--indigo-50); /* 主色浅底（选中态/悬浮底） */
+    --color-primary-soft:   var(--indigo-100);
+
+    /* —— 语义状态色 —— */
+    --color-success:      var(--green-600);
+    --color-success-light: var(--green-50);
+    --color-warning:      var(--amber-600);
+    --color-warning-light: var(--amber-50);
+    --color-danger:       var(--red-600);
+    --color-danger-light:  var(--red-50);
+    --color-info:         var(--indigo-600);
+    --color-info-light:    var(--indigo-50);
+    --color-neutral:      var(--slate-500);
+    --color-neutral-light: var(--slate-100);
+
+    /* —— 测试结果专属色（业务语义） —— */
+    --result-pass:  var(--green-600);
+    --result-fail:  var(--red-600);
+    --result-block: var(--amber-600);
+    --result-skip:  var(--slate-500);
+    --result-none:  var(--slate-400);
+
+    /* ====================================================================
+       字体系统
+       字号阶梯：12 → 13 → 14(基准) → 15 → 17 → 20 → 24 → 30
+       工具型应用基准 14px，比 16px 更紧凑、信息密度更高。
+       ==================================================================== */
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                 "Segoe UI", "PingFang SC", "Microsoft YaHei",
+                 "Helvetica Neue", system-ui, sans-serif;
+    --font-mono: "SF Mono", "JetBrains Mono", "Fira Code",
+                 "Consolas", "Menlo", monospace;
+
+    --text-xs:   0.75rem;    /* 12px  标签/辅助 */
+    --text-sm:   0.8125rem;  /* 13px  次要正文 */
+    --text-base: 0.875rem;   /* 14px  基准正文 */
+    --text-md:   0.9375rem;  /* 15px  卡片标题 */
+    --text-lg:   1.0625rem;  /* 17px  强调标题 */
+    --text-xl:   1.25rem;    /* 20px  页面标题 */
+    --text-2xl:  1.5rem;     /* 24px  统计数字 */
+    --text-3xl:  1.875rem;   /* 30px  庆祝/大数字 */
+
+    --font-weight-normal:   400;
+    --font-weight-medium:   500;
+    --font-weight-semibold: 600;
+    --font-weight-bold:     700;
+
+    --leading-tight:  1.3;   /* 标题 */
+    --leading-normal: 1.5;   /* 正文 */
+    --leading-relaxed: 1.7;  /* 长文本/多行 */
+
+    --tracking-tight:  -0.01em;
+    --tracking-normal:  0;
+    --tracking-wide:    0.02em;
+    --tracking-caps:    0.06em; /* 大写标签字距 */
+
+    /* ====================================================================
+       间距系统 · 4px 基准的 8 点栅格
+       所有内/外边距、栅格间距必须取自此阶梯，杜绝魔数。
+       ==================================================================== */
+    --space-0:  0;
+    --space-1:  0.25rem;  /*  4px */
+    --space-2:  0.5rem;   /*  8px */
+    --space-3:  0.75rem;  /* 12px */
+    --space-4:  1rem;     /* 16px */
+    --space-5:  1.25rem;  /* 20px */
+    --space-6:  1.5rem;   /* 24px */
+    --space-8:  2rem;     /* 32px */
+    --space-10: 2.5rem;   /* 40px */
+    --space-12: 3rem;     /* 48px */
+    --space-16: 4rem;     /* 64px */
+    --space-20: 5rem;     /* 80px */
+
+    /* 内容容器最大宽度 */
+    --container-max: 960px;
+    --container-narrow: 720px;
+
+    /* ====================================================================
+       圆角层级（克制：避免过度柔软，保持工具感）
+       ==================================================================== */
+    --radius-xs:   4px;   /* 小标签/徽章 */
+    --radius-sm:   6px;   /* 按钮/输入框 */
+    --radius-md:   8px;   /* 小卡片/下拉 */
+    --radius-lg:   12px;  /* 主卡片/弹窗 */
+    --radius-xl:   16px;  /* 大容器 */
+    --radius-full: 9999px;/* 胶囊/圆形 */
+
+    /* ====================================================================
+       分层阴影系统（slate 色调，冷灰而非纯黑，更精致）
+       ==================================================================== */
+    --shadow-xs: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+    --shadow-sm: 0 1px 3px 0 rgb(15 23 42 / 0.06),
+                 0 1px 2px -1px rgb(15 23 42 / 0.04);
+    --shadow-md: 0 4px 8px -2px rgb(15 23 42 / 0.08),
+                 0 2px 4px -2px rgb(15 23 42 / 0.05);
+    --shadow-lg: 0 12px 20px -4px rgb(15 23 42 / 0.10),
+                 0 4px 8px -2px rgb(15 23 42 / 0.06);
+    --shadow-xl: 0 20px 40px -8px rgb(15 23 42 / 0.14),
+                 0 8px 16px -4px rgb(15 23 42 / 0.08);
+    --shadow-focus: 0 0 0 3px rgb(79 70 229 / 0.15);  /* 主色聚焦环 */
+    --shadow-focus-danger: 0 0 0 3px rgb(220 38 38 / 0.15);
+
+    /* ====================================================================
+       动效令牌（统一的缓动曲线与时长）
+       ==================================================================== */
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);      /* 通用 */
+    --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1); /* 进场/强调 */
+    --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+    --duration-fast:   120ms;  /* 悬停/颜色 */
+    --duration-normal: 200ms;  /* 通用过渡 */
+    --duration-slow:   320ms;  /* 进场/位移 */
+    --duration-slower: 500ms;  /* 进度条填充 */
+
+    --transition-color:  color var(--duration-fast) var(--ease-standard);
+    --transition-border: border-color var(--duration-fast) var(--ease-standard);
+    --transition-bg:     background-color var(--duration-fast) var(--ease-standard);
+    --transition-all:    all var(--duration-normal) var(--ease-standard);
+    --transition-transform: transform var(--duration-normal) var(--ease-emphasized);
+
+    /* ====================================================================
+       层级 z-index（避免散乱的魔数）
+       ==================================================================== */
+    --z-base:     0;
+    --z-sticky:   100;   /* 顶栏 */
+    --z-dropdown: 200;   /* 下拉 */
+    --z-toast:    300;   /* Toast */
+    --z-modal:    400;   /* 弹窗遮罩+内容 */
+
+    /* ====================================================================
+       组件尺寸令牌
+       ==================================================================== */
+    --control-height-sm: 28px;
+    --control-height-md: 36px;  /* 标准控件高度 */
+    --control-height-lg: 44px;  /* 大控件/移动端最小触达 */
+    --topbar-height: 56px;
+
+    /* 按钮内边距 */
+    --btn-padding-sm: 6px 12px;
+    --btn-padding-md: 8px 16px;
+    --btn-padding-lg: 10px 20px;
+}
+
+/* ========================================================================
+   暗色主题 · 覆盖语义令牌（原始色阶不变）
+   用法：<html data-theme="dark"> 或 @media prefers-color-scheme
+   ======================================================================== */
+[data-theme="dark"] {
+    --color-bg:            var(--slate-950);
+    --color-surface:       var(--slate-900);
+    --color-surface-2:     var(--slate-800);
+    --color-surface-hover: var(--slate-800);
+
+    --color-text:           var(--slate-100);
+    --color-text-secondary: var(--slate-400);
+    --color-text-tertiary:  var(--slate-500);
+    --color-text-inverse:   var(--slate-950);
+
+    --color-border:        var(--slate-700);
+    --color-border-strong: var(--slate-600);
+    --color-border-light:  var(--slate-800);
+
+    --color-primary:        var(--indigo-400);
+    --color-primary-hover:  var(--indigo-300);
+    --color-primary-active: var(--indigo-200);
+    --color-primary-light:  var(--slate-900);
+    --color-primary-soft:   var(--indigo-900);
+
+    --color-success:      var(--green-500);
+    --color-success-light: rgba(34, 197, 94, 0.12);
+    --color-warning:      var(--amber-500);
+    --color-warning-light: rgba(245, 158, 11, 0.12);
+    --color-danger:       var(--red-500);
+    --color-danger-light:  rgba(239, 68, 68, 0.12);
+    --color-info:         var(--indigo-400);
+    --color-info-light:    var(--slate-900);
+    --color-neutral:      var(--slate-400);
+    --color-neutral-light: var(--slate-800);
+
+    --result-pass:  var(--green-500);
+    --result-fail:  var(--red-500);
+    --result-block: var(--amber-500);
+    --result-skip:  var(--slate-400);
+    --result-none:  var(--slate-600);
+
+    /* 暗色阴影更深沉 */
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4),
+                 0 1px 2px -1px rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 8px -2px rgb(0 0 0 / 0.45),
+                 0 2px 4px -2px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 12px 20px -4px rgb(0 0 0 / 0.5),
+                 0 4px 8px -2px rgb(0 0 0 / 0.35);
+    --shadow-xl: 0 20px 40px -8px rgb(0 0 0 / 0.6),
+                 0 8px 16px -4px rgb(0 0 0 / 0.4);
+    --shadow-focus: 0 0 0 3px rgb(129 140 248 / 0.25);
+}
+
+/* 尊重系统偏好：未显式声明 data-theme 时跟随系统 */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --color-bg:            var(--slate-950);
+        --color-surface:       var(--slate-900);
+        --color-surface-2:     var(--slate-800);
+        --color-surface-hover: var(--slate-800);
+        --color-text:           var(--slate-100);
+        --color-text-secondary: var(--slate-400);
+        --color-text-tertiary:  var(--slate-500);
+        --color-text-inverse:   var(--slate-950);
+        --color-border:        var(--slate-700);
+        --color-border-strong: var(--slate-600);
+        --color-border-light:  var(--slate-800);
+        --color-primary:        var(--indigo-400);
+        --color-primary-hover:  var(--indigo-300);
+        --color-primary-active: var(--indigo-200);
+        --color-primary-light:  var(--slate-900);
+        --color-primary-soft:   var(--indigo-900);
+        --color-success:      var(--green-500);
+        --color-success-light: rgba(34, 197, 94, 0.12);
+        --color-warning:      var(--amber-500);
+        --color-warning-light: rgba(245, 158, 11, 0.12);
+        --color-danger:       var(--red-500);
+        --color-danger-light:  rgba(239, 68, 68, 0.12);
+        --color-neutral:      var(--slate-400);
+        --color-neutral-light: var(--slate-800);
+        --result-pass:  var(--green-500);
+        --result-fail:  var(--red-500);
+        --result-block: var(--amber-500);
+        --result-skip:  var(--slate-400);
+        --result-none:  var(--slate-600);
+    }
+}
+
+/* ========================================================================
+   Layer 3 · 基础重置
+   ======================================================================== */
+html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    color: var(--color-text);
+    background-color: var(--color-bg);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    transition: background-color var(--duration-slow) var(--ease-standard),
+                color var(--duration-slow) var(--ease-standard);
+}
+
+/* 数字等宽对齐（统计/编号场景） */
+.tnum, .stat-number, .metric-ring .pct, .field-id .field-value {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
+
+/* 选中态统一为主色浅底 */
+::selection {
+    background: var(--color-primary-soft);
+    color: var(--color-primary-active);
+}
+
+/* 尊重「减少动态」偏好 */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* 滚动条（精致细节） */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: var(--radius-full);
+    border: 3px solid var(--color-bg);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--color-text-tertiary); }
+
+/* ========================================================================
+   兼容别名层 (Legacy Aliases)
+   ------------------------------------------------------------------------
+   app.js 的内联 <style> 与动态 HTML 引用了旧变量名（--surface / --primary
+   / --bg 等）。此处将旧名映射到新语义令牌，保证 JS 零改动即可生效。
+   新代码请勿使用这些旧名，一律采用 --color-* 语义令牌。
+   ======================================================================== */
+:root {
+    --surface:        var(--color-surface);
+    --bg:             var(--color-bg);
+    --text:           var(--color-text);
+    --text-secondary: var(--color-text-secondary);
+    --text-tertiary:  var(--color-text-tertiary);
+    --border:         var(--color-border);
+    --border-light:   var(--color-border-light);
+    --primary:        var(--color-primary);
+    --primary-light:  var(--color-primary-light);
+    --primary-dark:   var(--color-primary-hover);
+    --pass:           var(--result-pass);
+    --fail:           var(--result-fail);
+    --block:          var(--result-block);
+    --skip:           var(--result-skip);
+    /* 旧圆角阶梯映射到新阶梯（数值有微调，视觉更克制） */
+    --radius:    var(--radius-lg);   /* 旧 16px → 12px 主卡片 */
+    --radius-sm: var(--radius-md);   /* 旧 12px → 8px 按钮/输入 */
+    --radius-xs: var(--radius-sm);   /* 旧 8px  → 6px 小元素 */
+    /* 旧动效令牌 */
+    --ease: var(--ease-emphasized);
+    --t:     var(--transition-all);
+}

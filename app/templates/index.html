@@ -4,25 +4,29 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>测试用例记录表</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=3">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/design-tokens.css') }}?v=1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=5">
 </head>
 <body>
 
 <!-- 顶部导航 -->
 <div class="topbar" id="topbarMain">
     <div class="topbar-left">
-        <span class="topbar-logo">🧪</span>
-        <span class="topbar-title">测试用例记录表<span>TestCase Viewer</span></span>
+        <div class="logo">T</div>
+        <div class="brand">测试用例记录表<span>TestCase Viewer</span></div>
     </div>
     <div class="view-tabs">
-        <button class="view-tab active" id="tabExecute" onclick="switchView('execute')">▶ 执行测试</button>
-        <button class="view-tab" id="tabSummary" onclick="switchView('summary')">📊 汇总统计</button>
-        <button class="view-tab" id="tabIssues" onclick="switchView('issues')">📝 问题列表</button>
+        <button class="view-tab active" id="tabExecute" onclick="switchView('execute')">执行测试</button>
+        <button class="view-tab" id="tabSummary" onclick="switchView('summary')">汇总统计</button>
+        <button class="view-tab" id="tabIssues" onclick="switchView('issues')">问题列表</button>
     </div>
     <div class="topbar-right">
         <button class="btn btn-outline btn-sm" id="btnReplace" onclick="triggerReplaceFile()" title="上传新的测试用例 Excel 文件"><span>📂</span> 更换文件</button>
         <button class="btn btn-outline btn-sm" id="btnReload" onclick="reloadData()" title="重新加载当前 Excel（Excel 内容更新后点此刷新）"><span>↻</span> 刷新</button>
         <span id="topbarFilename">未加载</span>
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="切换明暗主题">
+            <span id="themeIcon">🌙</span><span id="themeLabel">暗色</span>
+        </button>
     </div>
 </div>
 

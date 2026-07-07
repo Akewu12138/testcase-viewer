@@ -13,6 +13,39 @@ let searchPageSize = 30;
 let searchLastParams = null;
 
 // ============================================================
+// 主题切换（Clarity 设计系统）
+// ============================================================
+function toggleTheme() {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    updateThemeToggle(next);
+}
+
+function updateThemeToggle(theme) {
+    const icon = document.getElementById('themeIcon');
+    const label = document.getElementById('themeLabel');
+    if (theme === 'dark') {
+        if (icon) icon.textContent = '☀️';
+        if (label) label.textContent = '亮色';
+    } else {
+        if (icon) icon.textContent = '🌙';
+        if (label) label.textContent = '暗色';
+    }
+}
+
+// 页面加载时恢复主题
+(function initTheme() {
+    const saved = localStorage.getItem('theme');
+    if (saved) {
+        document.documentElement.setAttribute('data-theme', saved);
+        updateThemeToggle(saved);
+    }
+})();
+
+// ============================================================
 // 视图切换
 // ============================================================
 function switchView(view) {
