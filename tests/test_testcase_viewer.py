@@ -437,3 +437,90 @@ class TestApiSave:
             content_type='application/json')
         # 理想情况下应该返回 400
         assert resp.status_code in (400, 500)
+
+
+# ============================================================
+# 阶段4 补充：未覆盖的 API 路由测试
+# ============================================================
+
+class TestApiTitles:
+    """测试 GET /api/titles — 用例标题列表（前端下拉跳转用）"""
+
+    def test_titles_loaded(self, app_client, populated_state):
+        """已加载 → 返回所有用例的 index/id/title"""
+        resp = app_client.get('/api/titles')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 3
+        assert data[0]['index'] == 0
+        assert data[0]['id'] == 'TC001'
+        assert data[0]['title'] == '登录功能测试'
+
+    def test_titles_unloaded(self, app_client):
+        """未加载 → 返回空列表（不崩溃）"""
+        resp = app_client.get('/api/titles')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data == []
+
+
+class TestApiReload:
+    """测试 GET /api/reload — 重新加载 Excel"""
+
+    def test_reload_success(self, app_client, populated_state, monkeypatch):
+        """找到活跃文件 → 重新解析并返回 success + total"""
+        from pathlib import Path
+        monkeypatch.setattr('testcase_viewer.find_excel_file',
+                            lambda: Path(populated_state['filepath']))
+        resp = app_client.get('/api/reload')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+        assert data['total'] == 3
+
+    def test_reload_no_file(self, app_client, monkeypatch):
+        """无活跃文件 → 404"""
+        monkeypatch.setattr('testcase_viewer.find_excel_file', lambda: None)
+        resp = app_client.get('/api/reload')
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert data['success'] is False
+
+
+class TestApiUpload:
+    """测试 POST /api/upload — 上传 Excel"""
+
+    def test_upload_no_file(self, app_client):
+        """未提供文件字段 → 400"""
+        resp = app_client.post('/api/upload')
+        assert resp.status_code == 400
+
+    def test_upload_empty_filename(self, app_client):
+        """文件名为空 → 400"""
+        from io import BytesIO
+        resp = app_client.post('/api/upload', data={
+            'file': (BytesIO(b''), '')
+        }, content_type='multipart/form-data')
+        assert resp.status_code == 400
+
+    def test_upload_wrong_format(self, app_client):
+        """非 Excel 格式 → 400"""
+        from io import BytesIO
+        resp = app_client.post('/api/upload', data={
+            'file': (BytesIO(b'fake content'), 'test.txt')
+        }, content_type='multipart/form-data')
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert '不支持' in data['error']
+
+
+class TestApiCheckResults:
+    """测试 GET /api/check-results — 检查活跃文件是否已有测试结果"""
+
+    def test_check_results_response(self, app_client):
+        """始终返回 has_results + filename 字段"""
+        resp = app_client.get('/api/check-results')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert 'has_results' in data
+        assert 'filename' in data
