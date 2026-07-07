@@ -21,6 +21,9 @@ import re
 from pathlib import Path
 from copy import copy
 
+# 阶段2：Repository 抽象层（API 通过此接口访问数据，不直碰 STATE/Excel）
+from app.services.repository import create_repository
+
 # ============================================================
 # 0. 依赖自检 & 自动安装
 # ============================================================
@@ -630,6 +633,9 @@ STATE = {
     'header_row': 1,         # 智能定位到的表头行号
 }
 
+# 阶段2 T6/T8：Repository 实例（config 驱动，换数据库只改这里）
+repo = create_repository(os.environ.get('STORAGE_BACKEND', 'excel'))
+
 
 @app.route('/')
 def index():
@@ -920,9 +926,19 @@ def api_save():
         # 复用 STATE 中已存储的 header_row 和 sheet_name
         header_row_idx = STATE.get('header_row', 1)
         sheet_name = STATE.get('sheet_name')
-        # 如果 sheet_name 为空（旧版兼容），则不传或默认为 None
-        save_result(STATE['filepath'], row_number, header_row_idx, sheet_name,
-                    result, actual_result, tester, bug_id, bug_frequency, issue_time)
+        # 阶段2 T6：通过 Repository 保存（不直接调 save_result）
+        repo.save(
+            filepath=STATE['filepath'],
+            row_number=row_number,
+            header_row_idx=header_row_idx,
+            sheet_name=sheet_name,
+            result=result,
+            actual_result=actual_result,
+            tester=tester,
+            bug_id=bug_id,
+            bug_frequency=bug_frequency,
+            issue_time=issue_time,
+        )
 
         # 更新内存
         STATE['testcases'][index]['_saved_result'] = result

@@ -35,3 +35,14 @@ line_length = 100
 [tool.pytest.ini_options]
 testpaths = ['tests']
 addopts = '-v --tb=short --cov=testcase_viewer --cov-report=term'
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false  # 渐进式：当前允许未注解函数，未来收紧
+
+# app/ 目录强制类型检查（阶段2 新增代码有完整注解）
+[[tool.mypy.overrides]]
+module = "app.*"
+disallow_untyped_defs = true

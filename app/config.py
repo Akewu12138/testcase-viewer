@@ -18,6 +18,9 @@ class Config:
     # Flask 调试模式
     DEBUG = os.environ.get('FLASK_DEBUG', '0') == '1'
 
+    # 存储后端类型（阶段2 T8）：当前支持 'excel'，未来可扩展 'sqlite'/'postgres'
+    STORAGE_BACKEND = os.environ.get('STORAGE_BACKEND', 'excel')
+
 
 class DevelopmentConfig(Config):
     """开发环境配置"""
