@@ -51,7 +51,7 @@ def _ensure_deps():
 
 _ensure_deps()
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, render_template
 import openpyxl
 
 # ============================================================
@@ -618,7 +618,7 @@ def build_display_fields(tc, mapping, headers):
 # ============================================================
 # 3. Flask 应用 & API
 # ============================================================
-app = Flask(__name__)
+app = Flask(__name__, template_folder="app/templates", static_folder="app/static")
 
 STATE = {
     'testcases': [],
@@ -633,7 +633,7 @@ STATE = {
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template("index.html")
 
 
 @app.route('/api/init')

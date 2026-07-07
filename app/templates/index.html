@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>测试用例记录表</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<div class="topbar" id="topbarMain">
+    <div class="topbar-left">
+        <span class="topbar-logo">🧪</span>
+        <span class="topbar-title">测试用例记录表<span>TestCase Viewer</span></span>
+    </div>
+    <div class="view-tabs">
+        <button class="view-tab active" id="tabExecute" onclick="switchView('execute')">▶ 执行测试</button>
+        <button class="view-tab" id="tabSummary" onclick="switchView('summary')">📊 汇总统计</button>
+        <button class="view-tab" id="tabIssues" onclick="switchView('issues')">📝 问题列表</button>
+    </div>
+    <div class="topbar-right">
+        <button class="btn btn-outline btn-sm" id="btnReplace" onclick="triggerReplaceFile()" title="上传新的测试用例 Excel 文件"><span>📂</span> 更换文件</button>
+        <button class="btn btn-outline btn-sm" id="btnReload" onclick="reloadData()" title="重新加载当前 Excel（Excel 内容更新后点此刷新）"><span>↻</span> 刷新</button>
+        <span id="topbarFilename">未加载</span>
+    </div>
+</div>
+
+<!-- ===== 执行测试视图 ===== -->
+<div id="viewExecute">
+    <!-- 进度条 -->
+    <div class="progress-wrap" id="progressWrap" style="display:none">
+        <div class="progress-info">
+            <span id="progressText">共 0 条</span>
+            <span id="progressPercent">0%</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        <div class="legend">
+            <span><span class="legend-dot pass"></span>通过 <span id="countPass">0</span></span>
+            <span><span class="legend-dot fail"></span>失败 <span id="countFail">0</span></span>
+            <span><span class="legend-dot block"></span>阻塞 <span id="countBlock">0</span></span>
+            <span><span class="legend-dot skip"></span>跳过 <span id="countSkip">0</span></span>
+            <span>未执行 <span id="countNone">0</span></span>
+        </div>
+    </div>
+
+    <div class="main-container" id="execContainer"></div>
+
+    <div class="nav-bar" id="navBar" style="display:none">
+        <button class="btn btn-nav" id="btnPrev" onclick="goTo(-1)" title="&#8592; 键">&#9664; 上一条</button>
+        <select class="case-jump-select" id="caseJumpSelect" onchange="if(this.value!==''){jumpToExecute(parseInt(this.value));}">
+            <option value="">&#128269; 选择用例跳转...</option>
+        </select>
+        <button class="btn btn-nav" id="btnNext" onclick="goTo(1)" title="&#8594; 键">下一条 &#9654;</button>
+    </div>
+    <div class="nav-hint" id="navHint" style="display:none">
+        <span class="kbd">&#8592;</span> 上一条 &nbsp; <span class="kbd">&#8594;</span> 下一条 &nbsp; <span class="kbd">Ctrl+S</span> 保存
+    </div>
+</div>
+
+<!-- ===== 搜索筛选视图 ===== -->
+<div id="viewSearch" style="display:none;">
+    <div class="search-bar-wrap" style="padding-top:16px;">
+        <input type="text" class="search-input" id="searchKeyword"
+               placeholder="输入关键词搜索（用例编号、标题、步骤等）..."
+               oninput="doSearch()" onkeydown="if(event.key==='Enter')doSearch()">
+        <select class="filter-select" id="filterResult" onchange="doSearch()">
+            <option value="">全部结果</option>
+            <option value="未执行">未执行</option>
+            <option value="通过">通过</option>
+            <option value="失败">失败</option>
+            <option value="阻塞">阻塞</option>
+            <option value="跳过">跳过</option>
+        </select>
+        <select class="filter-select" id="filterPriority" onchange="doSearch()">
+            <option value="">全部优先级</option>
+        </select>
+        <select class="filter-select" id="filterModule" onchange="doSearch()">
+            <option value="">全部模块</option>
+        </select>
+        <button class="search-clear" onclick="clearSearch()">&#10005; 清除</button>
+    </div>
+    <div class="search-info" id="searchInfo"></div>
+
+    <div class="main-container" id="searchContainer">
+        <div class="state-message"><div class="icon">&#128269;</div><h2>输入关键词开始搜索</h2></div>
+    </div>
+
+    <div class="pagination" id="searchPagination" style="display:none;"></div>
+</div>
+
+<!-- ===== 汇总统计视图 ===== -->
+<div id="viewSummary" style="display:none;">
+    <div class="main-container" id="summaryContainer">
+        <div class="state-message"><div class="icon">&#9203;</div><h2>加载中...</h2></div>
+    </div>
+</div>
+
+<!-- ===== 问题列表视图 ===== -->
+<div id="viewIssues" style="display:none;">
+    <div class="main-container" id="issuesContainer">
+        <div class="state-message"><div class="icon">&#9203;</div><h2>加载中...</h2></div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div id="toastContainer"></div>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
