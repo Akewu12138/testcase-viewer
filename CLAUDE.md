@@ -365,3 +365,33 @@
 1. 假设用户电脑已安装 Python 3（Mac 默认已安装；Windows 需先安装，启动脚本会检测并提示）
 2. 假设测试用例 Excel 格式规整（第一行表头，下方数据行）
 3. 假设浏览器为 Chrome / Edge / Safari 等现代浏览器
+
+---
+
+## 十一、开发流程规则（vibe-coding 规范化方案落地）
+
+> 以下规则确保开发过程遵循规范化方案，**AI 必须严格遵守**。
+
+### 1. 新功能需求 → 必须先走 PRD 流程
+
+用户提出新功能需求时（如"我要加一个 XXX 功能"），**必须**：
+1. 先加载 `requirement-to-prd` skill（路径：`~/.workbuddy/skills/requirement-to-prd/SKILL.md`）
+2. 按其流程：初步解析 → 逐步提问（一次 1-2 个）→ 写 PRD → 用户确认
+3. **PRD 确认后才能开始写代码**，不确认不动手
+
+### 2. 提交前检查 → pre-commit hook 自动拦截
+
+每次 `git commit` 前自动跑：JS 语法 + Python 语法 + `make test`（52 passed）。不通过阻止提交。
+
+### 3. 分支策略 → 不在 main 上直接改
+
+新功能建 `feat/` 分支，重构建 `refactor/` 分支，修 bug 建 `fix/` 分支。main 只接收合并。
+
+### 4. 测试先行 → 改代码后必跑测试
+
+任何代码改动后必须跑 `make test` 确认不回归。测试红了就是改坏了，测试绿了才安全。
+
+### 5. 编码规范 → Conventional Commits + 代码检查
+
+- 提交信息用规范格式：`feat:` / `fix:` / `style:` / `refactor:` / `docs:` / `chore:`
+- `make lint` 检查 Python 语法 + JS 语法（工具未装时降级为 py_compile + node --check）
