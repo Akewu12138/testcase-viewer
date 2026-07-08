@@ -309,7 +309,7 @@ function showReplaceConfirmDialog(filename) {
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `
             <div class="modal-box">
-                <h3>⚠️ 确认替换文件</h3>
+                <h3>确认替换文件</h3>
                 <p>当前活跃文件 <strong>${escapeHtml(filename)}</strong> 中已有测试执行结果。<br><br>
                    上传新文件后将覆盖当前文件，<br><strong>已有执行结果将会丢失</strong>。<br>
                    如需保留，请先备份原文件。</p>
@@ -713,8 +713,10 @@ function renderSearchResults(data) {
 
     let html = '<div class="search-result-list">';
     for (const r of results) {
+        const rc = r.result ? resultCss(r.result) : 'neutral';
+        const badgeColors = {'pass': 'success', 'fail': 'danger', 'block': 'warning', 'skip': 'neutral', 'neutral': 'neutral'};
         const badge = r.result
-            ? `<span class="result-badge result-badge-${resultCss(r.result)}">${escapeHtml(r.result)}</span>`
+            ? `<span class="badge badge-${rc}"><span class="badge-dot" style="background:var(--color-${badgeColors[rc]})"></span>${escapeHtml(r.result)}</span>`
             : '';
         const snippet = r.snippet ? highlightText(r.snippet, kw) : '';
         const titleDisplay = kw ? highlightText(r.name || r.title, kw) : escapeHtml(r.name || r.title);
@@ -877,7 +879,7 @@ function renderSummary(data) {
     // 按优先级汇总
     const priKeys = Object.keys(by_priority).sort();
     if (priKeys.length > 0) {
-        html += `<div class="summary-table-wrap"><h3>⚡ 按优先级分布</h3>
+        html += `<div class="summary-table-wrap"><h3>按优先级分布</h3>
         <table class="summary-table">
             <tr><th>优先级</th><th>用例数</th><th style="color:var(--pass)">通过</th><th style="color:var(--fail)">失败</th><th style="color:var(--block)">阻塞</th><th>跳过</th><th>未执行</th><th>进度</th></tr>`;
         for (const p of priKeys) {
@@ -905,7 +907,7 @@ function renderSummary(data) {
     // 按模块汇总
     const modKeys = Object.keys(by_module).sort();
     if (modKeys.length > 0) {
-        html += `<div class="summary-table-wrap"><h3>&#128193; 按模块分布</h3>
+        html += `<div class="summary-table-wrap"><h3>按模块分布</h3>
         <table class="summary-table">
             <tr><th>模块</th><th>用例数</th><th style="color:var(--pass)">通过</th><th style="color:var(--fail)">失败</th><th style="color:var(--block)">阻塞</th><th>跳过</th><th>未执行</th><th>进度</th></tr>`;
         for (const m of modKeys) {
@@ -942,7 +944,7 @@ function showUnsavedDialog() {
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `
             <div class="modal-box">
-                <h3>⚠️ 有未保存的更改</h3>
+                <h3>有未保存的更改</h3>
                 <p>当前用例的结果或备注尚未保存，<br>切换后将丢失这些更改。是否先保存？</p>
                 <div class="modal-actions">
                     <button class="btn-modal-ghost" id="modalDiscard">不保存，直接切换</button>
@@ -1108,7 +1110,9 @@ async function loadIssues() {
                     html += '<div class="issue-item" onclick="jumpToExecute(' + item.index + ')">';
                     html += '<div class="issue-header">';
                     html += '<span class="issue-id">' + escapeHtml(tc.id || tc.col_0 || '#' + (item.index+1)) + '</span>';
-                    html += '<span class="result-badge result-badge-' + resultCss(item.result) + '">' + escapeHtml(item.result) + '</span>';
+                    var _rc = resultCss(item.result);
+                    var _bc = {'pass':'success','fail':'danger','block':'warning','skip':'neutral'};
+                    html += '<span class="badge badge-' + _rc + '"><span class="badge-dot" style="background:var(--color-' + (_bc[_rc]||'neutral') + ')"></span>' + escapeHtml(item.result) + '</span>';
                     html += '</div>';
                     html += '<div class="issue-title">' + escapeHtml(tc.name || tc.title || tc.col_2 || '(无标题)') + '</div>';
                     html += '<div class="issue-meta">';
