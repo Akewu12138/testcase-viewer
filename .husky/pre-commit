@@ -1,0 +1,46 @@
+#!/bin/sh
+# pre-commit hook（规范化方案第2+4层：提交前自动检查）
+# 安装方法：cp .husky/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# 或装 Husky 后自动激活：npm install husky --save-dev && npx husky install
+
+echo "🔍 提交前检查..."
+
+# 切到项目根目录
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# 1. JS 语法检查（零依赖，快）
+if [ -f app/static/js/app.js ]; then
+    if command -v node >/dev/null 2>&1; then
+        node --check app/static/js/app.js 2>&1
+        if [ $? -ne 0 ]; then
+            echo "❌ JS 语法错误，提交被阻止！"
+            echo "   修复 app/static/js/app.js 后重试"
+            exit 1
+        fi
+        echo "  ✅ JS 语法检查通过"
+    fi
+fi
+
+# 2. Python 语法检查（零依赖，快）
+PYTHON="${PYTHON:-/usr/bin/python3}"
+if [ -f testcase_viewer.py ]; then
+    $PYTHON -m py_compile testcase_viewer.py 2>&1
+    if [ $? -ne 0 ]; then
+        echo "❌ Python 语法错误，提交被阻止！"
+        exit 1
+    fi
+    echo "  ✅ Python 语法检查通过"
+fi
+
+# 3. 跑测试（52 passed，约 0.4 秒）
+if [ -f Makefile ]; then
+    make test 2>&1 | grep -E "passed|failed|error" | tail -1
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        echo "❌ 测试失败，提交被阻止！"
+        echo "   修复测试后再提交，或用 git commit --no-verify 跳过（不推荐）"
+        exit 1
+    fi
+    echo "  ✅ 测试通过"
+fi
+
+echo "✅ 提交前检查全部通过，允许提交"
