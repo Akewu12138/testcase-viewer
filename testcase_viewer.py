@@ -63,7 +63,6 @@ import openpyxl
 BASE_DIR = Path(__file__).parent.resolve()
 TESTCASES_DIR = BASE_DIR / 'testcases'
 PORT = 8765
-ACTIVE_FILENAME = '_active.xlsx'
 MEMORY_FILE = TESTCASES_DIR / '_memory.json'  # 记录原始文件名
 
 # 列名智能识别规则（支持中英文常见表头）
@@ -93,7 +92,6 @@ TIME_COL   = '执行时间'
 # ============================================================
 # 2. Excel 操作
 # ============================================================
-ACTIVE_PATH = TESTCASES_DIR / ACTIVE_FILENAME
 
 
 def find_excel_file():
@@ -162,11 +160,21 @@ def validate_excel(filepath):
 
 
 def has_test_results():
-    """检查当前活跃文件是否已有测试结果（用于覆盖前确认）"""
-    if not ACTIVE_PATH.exists():
+    """检查当前活跃文件是否已有测试结果（用于覆盖前确认）。
+
+    文件来源优先级：STATE['filepath'] → find_excel_file() → None。
+    不再依赖已废弃的 _active.xlsx 固定文件名。
+    """
+    filepath = STATE.get('filepath')
+    if not filepath:
+        found = find_excel_file()
+        if not found:
+            return False
+        filepath = str(found)
+    if not Path(filepath).exists():
         return False
     try:
-        wb = openpyxl.load_workbook(ACTIVE_PATH, data_only=True)
+        wb = openpyxl.load_workbook(filepath, data_only=True)
         ws = wb.active
         headers = [str(ws.cell(row=1, column=c + 1).value).strip()
                    if ws.cell(row=1, column=c + 1).value is not None else ''
@@ -991,7 +999,7 @@ def api_reload():
 
 @app.route('/api/upload', methods=['POST'])
 def api_upload():
-    """上传 Excel 文件，保存为 _active.xlsx"""
+    """上传 Excel 文件，保留原始文件名并写入记忆"""
     global STATE
 
     if 'file' not in request.files:
@@ -1051,7 +1059,7 @@ def api_upload():
 
         return jsonify({
             'success': True,
-            'filename': original_name,
+            'filename': file.filename,
             'total': len(testcases),
         })
     except Exception as e:
@@ -1068,7 +1076,7 @@ def api_upload():
 def api_check_results():
     """检查当前活跃文件是否已有测试结果（用于上传前确认）"""
     has = has_test_results()
-    display_name = read_memory() or ACTIVE_FILENAME
+    display_name = read_memory() or STATE.get('filename', '')
     return jsonify({
         'has_results': has,
         'filename': display_name,
