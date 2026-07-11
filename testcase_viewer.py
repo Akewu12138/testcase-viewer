@@ -146,14 +146,30 @@ def validate_excel(filepath):
     """校验 Excel 格式是否合法（有表头，有数据）"""
     try:
         wb = openpyxl.load_workbook(filepath, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
+        has_usable_sheet = False
+        all_empty = True
+        for ws in wb.worksheets:
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
+            if any(
+                cell is not None and str(cell).strip()
+                for row in rows
+                for cell in row
+            ):
+                all_empty = False
+            if len(rows) >= 2:
+                header_idx, headers = _find_header_row(ws)
+                has_header = bool(headers) and any(str(h).strip() for h in headers)
+                has_data = _count_data_rows(ws, header_idx) > 0 if header_idx else False
+                if has_header and has_data:
+                    has_usable_sheet = True
+                    break
         wb.close()
-        if len(rows) < 2:
-            return False, 'Excel 至少需要一行表头和一行数据，当前数据不足'
-        # 检查表头是否全是空的
-        if all(cell is None or str(cell).strip() == '' for cell in rows[0]):
-            return False, 'Excel 第一行（表头）为空，请确保第一行为列名'
+        if all_empty:
+            return False, 'Excel 文件为空，请上传包含表头和数据的测试用例文件'
+        if not has_usable_sheet:
+            return False, 'Excel 至少需要一个包含表头和数据的 Sheet'
         return True, ''
     except Exception as e:
         return False, f'无法读取 Excel 文件，文件可能已损坏: {str(e)}'
@@ -307,6 +323,156 @@ def _count_data_rows(ws, header_idx):
     return count
 
 
+CORE_FIELDS = {'id', 'title', 'steps', 'expected', 'precondition',
+               'purpose', 'priority', 'module', 'category', 'result_col', 'remark_col'}
+NAME_BONUS_KEYWORDS = ['用例', 'case', 'testcase', 'test case', 'test-case', 'cases', 'testcases']
+
+
+def _classify_sheet(ws):
+    """判定单个 Sheet 是测试用例 Sheet 还是参考信息 Sheet。"""
+    raw_rows = list(ws.iter_rows(values_only=True, max_row=min(ws.max_row, 100)))
+    header_idx, headers = _find_header_row(ws)
+    mapping = detect_columns(headers)
+    core_count = len([f for f in mapping if f in CORE_FIELDS])
+
+    name_bonus = 0
+    sname_lower = ws.title.lower()
+    for kw in NAME_BONUS_KEYWORDS:
+        if kw in sname_lower:
+            name_bonus = 10
+            break
+
+    min_core = 2 if name_bonus > 0 else 3
+    data_rows = _count_data_rows(ws, header_idx) if header_idx else 0
+    sheet_type = 'testcase' if len(raw_rows) >= 2 and data_rows > 0 and core_count >= min_core else 'note'
+
+    return {
+        'name': ws.title,
+        'sheet_name': ws.title,
+        'sheet_type': sheet_type,
+        'header_row': header_idx or 1,
+        'headers': headers,
+        'mapping': mapping,
+        'case_count': data_rows if sheet_type == 'testcase' else 0,
+        'core_field_count': core_count,
+    }
+
+
+def _parse_testcase_sheet(ws, meta):
+    """把一个已分类为测试用例的 Sheet 解析成用例 dict 列表。"""
+    all_rows = list(ws.iter_rows(values_only=True))
+    header_idx = meta['header_row']
+    headers = meta['headers']
+    mapping = meta['mapping']
+    data_rows = all_rows[header_idx:]
+
+    result_col_idx = _find_col_index(headers, COLUMN_PATTERNS.get('result_col', [SAVE_COLUMNS['result']]))
+    remark_col_idx = _find_col_index(headers, COLUMN_PATTERNS.get('remark_col', [SAVE_COLUMNS['actual_result']]))
+
+    testcases = []
+    for row_idx_in_data, row in enumerate(data_rows):
+        if all(cell is None or str(cell).strip() == '' for cell in row):
+            continue
+
+        excel_row_number = header_idx + 1 + row_idx_in_data
+        tc = {
+            '_row': excel_row_number,
+            '_sheet_name': meta['name'],
+            '_header_row': header_idx,
+            '_headers': headers,
+            '_mapping': mapping,
+        }
+
+        for i, value in enumerate(row):
+            tc[f'col_{i}'] = str(value).strip() if value is not None else ''
+            tc[f'_header_{i}'] = headers[i] if i < len(headers) else f'列{i+1}'
+
+        for field, col_idx in mapping.items():
+            if field != '_headers' and col_idx < len(row):
+                raw_val = row[col_idx]
+                tc[field] = str(raw_val).strip() if raw_val is not None else ''
+
+        if result_col_idx is not None and result_col_idx < len(row):
+            tc['_saved_result'] = str(row[result_col_idx]).strip() if row[result_col_idx] is not None else ''
+        else:
+            tc['_saved_result'] = ''
+
+        if remark_col_idx is not None and remark_col_idx < len(row):
+            tc['_saved_actual_result'] = str(row[remark_col_idx]).strip() if row[remark_col_idx] is not None else ''
+        else:
+            tc['_saved_actual_result'] = ''
+
+        for extra_key, col_name in [('_saved_tester', '测试人员'),
+                                    ('_saved_bug_id', 'BugID'),
+                                    ('_saved_bug_frequency', 'Bug频率'),
+                                    ('_saved_issue_time', '问题时间')]:
+            extra_col = None
+            for i, h in enumerate(headers):
+                if h == col_name:
+                    extra_col = i
+                    break
+            if extra_col is not None and extra_col < len(row):
+                tc[extra_key] = str(row[extra_col]).strip() if row[extra_col] is not None else ''
+            else:
+                tc[extra_key] = ''
+
+        search_parts = []
+        for i in range(len(row)):
+            cell_val = tc.get(f'col_{i}', '')
+            if cell_val and cell_val != 'None':
+                search_parts.append(cell_val)
+        tc['_search_text'] = ' '.join(search_parts)
+        testcases.append(tc)
+
+    return testcases
+
+
+def read_all_sheets(filepath):
+    """读取 Excel 全部 Sheet，分类为用例 Sheet 与参考信息 Sheet。"""
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    sheets = []
+    testcase_sheets = []
+    note_sheets = []
+    testcases = []
+
+    for sname in wb.sheetnames:
+        ws = wb[sname]
+        meta = _classify_sheet(ws)
+        if meta['sheet_type'] == 'testcase':
+            sheet_cases = _parse_testcase_sheet(ws, meta)
+            meta['case_count'] = len(sheet_cases)
+            testcases.extend(sheet_cases)
+            testcase_sheets.append({
+                'name': meta['name'],
+                'case_count': meta['case_count'],
+                'header_row': meta['header_row'],
+            })
+        else:
+            note_sheets.append({
+                'name': meta['name'],
+                'header_row': meta['header_row'],
+            })
+        sheets.append(meta)
+
+    first_testcase_sheet = next((s for s in sheets if s['sheet_type'] == 'testcase'), None)
+    mapping = first_testcase_sheet['mapping'] if first_testcase_sheet else {}
+    headers = first_testcase_sheet['headers'] if first_testcase_sheet else []
+    sheet_name = first_testcase_sheet['name'] if first_testcase_sheet else (wb.sheetnames[0] if wb.sheetnames else '')
+    header_row = first_testcase_sheet['header_row'] if first_testcase_sheet else 1
+    wb.close()
+
+    return {
+        'testcases': testcases,
+        'mapping': mapping,
+        'headers': headers,
+        'sheet_name': sheet_name,
+        'header_row': header_row,
+        'sheets': sheets,
+        'testcase_sheets': testcase_sheets,
+        'note_sheets': note_sheets,
+    }
+
+
 def _pick_best_sheet(wb):
     """在多个 Sheet 中自动选择真正的测试用例 Sheet。
     判断标准：
@@ -317,12 +483,6 @@ def _pick_best_sheet(wb):
       5. 再同条件下选数据行最多的那个
     不满足条件 2 的 Sheet 视为补充说明，不会被选中。
     """
-    CORE_FIELDS = {'id', 'title', 'steps', 'expected', 'precondition',
-                   'purpose', 'priority', 'module', 'category', 'result_col', 'remark_col'}
-
-    # 用例相关关键词（大小写不敏感）
-    NAME_BONUS_KEYWORDS = ['用例', 'case', 'testcase', 'test case', 'test-case', 'cases', 'testcases']
-
     best_sheet = wb.active
     best_score = (-1, -1, False, 0)   # (name_bonus, core_field_count, has_result, data_rows)
 
@@ -635,6 +795,9 @@ STATE = {
     'testcases': [],
     'mapping': {},
     'headers': [],
+    'sheets': [],
+    'testcase_sheets': [],
+    'note_sheets': [],
     'filepath': None,
     'filename': '',
     'sheet_name': None,      # 实际使用的 sheet 名称
@@ -643,6 +806,20 @@ STATE = {
 
 # 阶段2 T6/T8：Repository 实例（config 驱动，换数据库只改这里）
 repo = create_repository(os.environ.get('STORAGE_BACKEND', 'excel'))
+
+
+def _apply_loaded_data(filepath, loaded):
+    """把 read_all_sheets 的结果写入全局 STATE，保留旧字段兼容。"""
+    STATE['testcases'] = loaded['testcases']
+    STATE['mapping'] = loaded['mapping']
+    STATE['headers'] = loaded['headers']
+    STATE['sheets'] = loaded['sheets']
+    STATE['testcase_sheets'] = loaded['testcase_sheets']
+    STATE['note_sheets'] = loaded['note_sheets']
+    STATE['filepath'] = str(filepath)
+    STATE['filename'] = Path(filepath).name
+    STATE['sheet_name'] = loaded['sheet_name']
+    STATE['header_row'] = loaded['header_row']
 
 
 @app.route('/')
@@ -658,7 +835,31 @@ def api_init():
         'filename': display_name,
         'total': len(STATE['testcases']),
         'has_active': find_excel_file() is not None,
+        'sheet_count': len(STATE.get('sheets', [])),
+        'testcase_sheet_count': len(STATE.get('testcase_sheets', [])),
+        'note_sheet_count': len(STATE.get('note_sheets', [])),
     })
+
+
+@app.route('/api/sheets')
+def api_sheets():
+    """返回当前 Excel 文件中所有 Sheet 的分类信息。"""
+    filepath = STATE.get('filepath') or find_excel_file()
+    if filepath is None:
+        return jsonify({'error': '未找到活跃文件，请先上传测试用例 Excel'}), 404
+
+    try:
+        if not STATE.get('sheets') or str(filepath) != STATE.get('filepath'):
+            loaded = read_all_sheets(filepath)
+            _apply_loaded_data(filepath, loaded)
+
+        return jsonify({
+            'testcase_sheets': STATE.get('testcase_sheets', []),
+            'note_sheets': STATE.get('note_sheets', []),
+            'total_sheets': len(STATE.get('sheets', [])),
+        })
+    except Exception as e:
+        return jsonify({'error': f'读取 Sheet 信息失败: {str(e)}'}), 500
 
 
 @app.route('/api/titles')
@@ -683,7 +884,11 @@ def api_testcase(index):
 
     tc = STATE['testcases'][index].copy()
     tc['_index'] = index
-    tc['_display_fields'] = build_display_fields(tc, STATE['mapping'], STATE['headers'])
+    tc['_display_fields'] = build_display_fields(
+        tc,
+        tc.get('_mapping', STATE['mapping']),
+        tc.get('_headers', STATE['headers']),
+    )
     tc['_total'] = len(STATE['testcases'])
 
     return jsonify(tc)
@@ -697,27 +902,21 @@ def api_all_status():
 
     try:
         wb = openpyxl.load_workbook(STATE['filepath'], data_only=True)
-        # 使用 STATE 中记录的 sheet_name，而不是 wb.active
-        sn = STATE.get('sheet_name')
-        ws = wb[sn] if sn else wb.active
-
-        # 使用 STATE 中记录的表头行号
-        header_row = STATE.get('header_row', 1)
-
-        headers_row = [
-            str(ws.cell(row=header_row, column=c + 1).value).strip()
-            if ws.cell(row=header_row, column=c + 1).value is not None else ''
-            for c in range(ws.max_column)
-        ]
-
-        result_col = None
-        for i, h in enumerate(headers_row):
-            if h == RESULT_COL:
-                result_col = i + 1
-                break
-
         statuses = []
         for tc in STATE['testcases']:
+            sn = tc.get('_sheet_name') or STATE.get('sheet_name')
+            ws = wb[sn] if sn else wb.active
+            header_row = tc.get('_header_row') or STATE.get('header_row', 1)
+            headers_row = [
+                str(ws.cell(row=header_row, column=c + 1).value).strip()
+                if ws.cell(row=header_row, column=c + 1).value is not None else ''
+                for c in range(ws.max_column)
+            ]
+            result_col = None
+            for i, h in enumerate(headers_row):
+                if h == RESULT_COL:
+                    result_col = i + 1
+                    break
             row = tc['_row']
             if result_col:
                 cell_val = ws.cell(row=row, column=result_col).value
@@ -930,10 +1129,10 @@ def api_save():
         return jsonify({'success': False, 'error': '未找到 Excel 文件'}), 400
 
     try:
-        row_number = STATE['testcases'][index]['_row']
-        # 复用 STATE 中已存储的 header_row 和 sheet_name
-        header_row_idx = STATE.get('header_row', 1)
-        sheet_name = STATE.get('sheet_name')
+        tc = STATE['testcases'][index]
+        row_number = tc['_row']
+        header_row_idx = tc.get('_header_row') or STATE.get('header_row', 1)
+        sheet_name = tc.get('_sheet_name') or STATE.get('sheet_name')
         # 阶段2 T6：通过 Repository 保存（不直接调 save_result）
         repo.save(
             filepath=STATE['filepath'],
@@ -978,20 +1177,15 @@ def api_reload():
         }), 404
 
     try:
-        testcases, mapping, headers, sheet_name, header_row = read_testcases(filepath)
-        STATE['testcases'] = testcases
-        STATE['mapping'] = mapping
-        STATE['headers'] = headers
-        STATE['filepath'] = str(filepath)
-        STATE['filename'] = filepath.name
-        STATE['sheet_name'] = sheet_name
-        STATE['header_row'] = header_row
+        loaded = read_all_sheets(filepath)
+        _apply_loaded_data(filepath, loaded)
         display_name = read_memory() or filepath.name
 
         return jsonify({
             'success': True,
             'filename': display_name,
-            'total': len(testcases),
+            'total': len(STATE['testcases']),
+            'sheet_count': len(STATE.get('sheets', [])),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1048,19 +1242,14 @@ def api_upload():
         write_memory(file.filename)
 
         # 重新解析
-        testcases, mapping, headers, sheet_name, header_row = read_testcases(dest_path)
-        STATE['testcases'] = testcases
-        STATE['mapping'] = mapping
-        STATE['headers'] = headers
-        STATE['filepath'] = str(dest_path)
-        STATE['filename'] = file.filename
-        STATE['sheet_name'] = sheet_name
-        STATE['header_row'] = header_row
+        loaded = read_all_sheets(dest_path)
+        _apply_loaded_data(dest_path, loaded)
 
         return jsonify({
             'success': True,
             'filename': file.filename,
-            'total': len(testcases),
+            'total': len(STATE['testcases']),
+            'sheet_count': len(STATE.get('sheets', [])),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': f'处理文件时出错: {str(e)}'}), 500
@@ -2966,18 +3155,12 @@ def main():
     else:
         print(f"\U0001f4c2 找到活跃文件: {read_memory() or filepath.name}")
         try:
-            testcases, mapping, headers, sheet_name, header_row = read_testcases(filepath)
-            STATE['testcases'] = testcases
-            STATE['mapping'] = mapping
-            STATE['headers'] = headers
-            STATE['sheet_name'] = sheet_name
-            STATE['header_row'] = header_row
-            STATE['filepath'] = str(filepath)
-            STATE['filename'] = filepath.name
+            loaded = read_all_sheets(filepath)
+            _apply_loaded_data(filepath, loaded)
 
-            print(f"\U0001f4ca 共读取 {len(testcases)} 条测试用例")
-            if mapping:
-                recognized = [k for k in mapping if k != '_headers']
+            print(f"\U0001f4ca 共读取 {len(STATE['testcases'])} 条测试用例")
+            if STATE['mapping']:
+                recognized = [k for k in STATE['mapping'] if k != '_headers']
                 if recognized:
                     print(f"\U0001f50d 识别到的字段: {', '.join(recognized)}")
             print()

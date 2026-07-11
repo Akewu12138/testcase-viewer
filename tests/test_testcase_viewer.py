@@ -20,6 +20,7 @@ from testcase_viewer import (
     find_excel_file,
     detect_columns,
     read_testcases,
+    read_all_sheets,
     save_result,
     build_display_fields,
     app,
@@ -171,6 +172,25 @@ class TestReadTestcases:
         """不存在的文件路径 → 抛出异常"""
         with pytest.raises(Exception):
             read_testcases("/nonexistent/path/file.xlsx")
+
+
+class TestReadAllSheets:
+    """测试 read_all_sheets() — 多 Sheet 读取与分类"""
+
+    def test_classifies_testcase_and_note_sheets(self, multi_sheet_workbook):
+        """多 Sheet Excel → 正确区分用例 Sheet 与非用例 Sheet"""
+        loaded = read_all_sheets(multi_sheet_workbook)
+
+        assert len(loaded['testcases']) == 3
+        assert [s['name'] for s in loaded['testcase_sheets']] == ["登录用例", "支付用例"]
+        assert [s['name'] for s in loaded['note_sheets']] == ["说明", "统计"]
+        assert loaded['testcases'][0]['_sheet_name'] == "登录用例"
+        assert loaded['testcases'][2]['_sheet_name'] == "支付用例"
+
+    def test_read_testcases_keeps_compatible_return_shape(self, multi_sheet_workbook):
+        """read_testcases 仍返回旧版五元组，避免旧调用方破坏"""
+        result = read_testcases(multi_sheet_workbook)
+        assert len(result) == 5
 
 
 class TestSaveResult:
@@ -411,6 +431,40 @@ class TestApiFilterOptions:
         assert '登录模块' in data['modules']
 
 
+class TestApiSheets:
+    """测试 GET /api/sheets — Sheet 分类信息"""
+
+    def test_sheets_loaded(self, app_client, populated_multi_sheet_state):
+        """已加载多 Sheet 文件 → 返回 PRD 定义的分类结构"""
+        resp = app_client.get('/api/sheets')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['total_sheets'] == 4
+        assert data['testcase_sheets'][0] == {
+            'name': '登录用例',
+            'case_count': 2,
+            'header_row': 1,
+        }
+        assert data['testcase_sheets'][1]['name'] == '支付用例'
+        assert data['note_sheets'][0]['name'] == '说明'
+        assert data['note_sheets'][1]['name'] == '统计'
+
+    def test_sheets_no_file(self, app_client, monkeypatch):
+        """无活跃文件 → 404 + 中文错误"""
+        original_filepath = STATE['filepath']
+        original_sheets = STATE.get('sheets', [])
+        STATE['filepath'] = None
+        STATE['sheets'] = []
+        monkeypatch.setattr('testcase_viewer.find_excel_file', lambda: None)
+        resp = app_client.get('/api/sheets')
+        STATE['filepath'] = original_filepath
+        STATE['sheets'] = original_sheets
+
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert '未找到活跃文件' in data['error']
+
+
 class TestApiSave:
     """测试 POST /api/save"""
 
@@ -437,6 +491,30 @@ class TestApiSave:
             content_type='application/json')
         # 理想情况下应该返回 400
         assert resp.status_code in (400, 500)
+
+    def test_save_to_case_own_sheet(self, app_client, populated_multi_sheet_state):
+        """多 Sheet 下保存第三条全局用例 → 写入其所属的支付用例 Sheet"""
+        resp = app_client.post('/api/save',
+            data=json.dumps({
+                'index': 2,
+                'result': '失败',
+                'actual_result': '支付回调异常',
+            }),
+            content_type='application/json')
+        assert resp.status_code == 200
+        assert resp.get_json()['success'] is True
+
+        wb = openpyxl.load_workbook(populated_multi_sheet_state['filepath'], data_only=True)
+        ws_login = wb['登录用例']
+        ws_pay = wb['支付用例']
+        pay_headers = [ws_pay.cell(row=1, column=c + 1).value for c in range(ws_pay.max_column)]
+        result_col = pay_headers.index('测试结果') + 1
+        actual_col = pay_headers.index('实际结果') + 1
+        assert ws_pay.cell(row=2, column=result_col).value == '失败'
+        assert ws_pay.cell(row=2, column=actual_col).value == '支付回调异常'
+        login_headers = [ws_login.cell(row=1, column=c + 1).value for c in range(ws_login.max_column)]
+        assert '测试结果' not in login_headers
+        wb.close()
 
 
 # ============================================================

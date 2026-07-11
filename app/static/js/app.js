@@ -68,7 +68,8 @@ function _doSwitch(view) {
     if (issuesDiv) issuesDiv.style.display = view === 'issues' ? 'block' : 'none';
 
     document.getElementById('tabExecute').classList.toggle('active', view === 'execute');
-    document.getElementById('tabSearch').classList.toggle('active', view === 'search');
+    var tabSearch = document.getElementById('tabSearch');
+    if (tabSearch) tabSearch.classList.toggle('active', view === 'search');
     document.getElementById('tabSummary').classList.toggle('active', view === 'summary');
     var tabIssues = document.getElementById('tabIssues');
     if (tabIssues) tabIssues.classList.toggle('active', view === 'issues');

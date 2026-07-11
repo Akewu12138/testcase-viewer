@@ -90,15 +90,20 @@ class SheetMeta:
     记录用例数据来自哪个 Sheet、表头在哪行、列映射关系。
     """
     sheet_name: str = ''          # Sheet 名称
+    sheet_type: str = 'testcase'  # testcase / note
     header_row: int = 1           # 表头行号（1-based）
     headers: List[str] = field(default_factory=list)        # 表头列表
     mapping: Dict[str, int] = field(default_factory=dict)   # 列映射：field_name -> col_index
+    case_count: int = 0           # 该 Sheet 下的测试用例数
 
 
 @dataclass
 class LoadedData:
     """read_testcases 返回的完整数据包。"""
     testcases: List[Dict] = field(default_factory=list)     # 当前用 dict，未来改 List[TestCase]
+    sheets: List[SheetMeta] = field(default_factory=list)
+    testcase_sheets: List[str] = field(default_factory=list)
+    note_sheets: List[str] = field(default_factory=list)
     mapping: Dict[str, int] = field(default_factory=dict)
     headers: List[str] = field(default_factory=list)
     sheet_name: str = ''
